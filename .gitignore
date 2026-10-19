@@ -1,0 +1,20 @@
+# Game data — never commit (bring your own copy of the game)
+/original/
+/extracted/
+/decompiled/
+/visionOS/Euphoria/Resources/Game/
+*.zip
+*.ypf
+*.ybn
+*.sd
+
+# Build output
+/.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Python / macOS
+__pycache__/
+*.pyc
+.DS_Store
