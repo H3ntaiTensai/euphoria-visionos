@@ -5,8 +5,8 @@ Usage: import_saves.py ORIGINAL_SAVE_DIR STORY_DIR OUT_DIR
 
   ORIGINAL_SAVE_DIR  the PC game's save folder (save00001.sd ..., gsd.sd)
   STORY_DIR          the converted story (visionOS/Euphoria/Resources/Game/story)
-  OUT_DIR            the app's Documents folder, for example the simulator's:
-                     $(xcrun simctl get_app_container booted com.euphoria.vision data)/Documents
+  OUT_DIR            a local folder; copy its contents to the app's Documents
+                     folder on the headset (see README › Importing PC saves)
 
 Writes Saves/slotN.json for saveNNNNN.sd (save10001 becomes the quick save,
 save3000N slot 110+N) and globals.json from gsd.sd.

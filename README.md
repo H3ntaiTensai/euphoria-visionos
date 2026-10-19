@@ -1,12 +1,10 @@
 # Euphoria for Apple Vision Pro
 
-A native visionOS app that plays your own copy of **Euphoria** (the MangaGamer English PC release). It runs the original story in Swift and SwiftUI. There is no Ren'Py, no web view and no Windows engine.
+A native visionOS app that plays your own copy of **Euphoria** (the MangaGamer English PC release). It runs the original story in Swift and SwiftUI.
 
 This repository holds **only the build kit**: Swift source, the conversion tools and docs. **It does not include any game files.** You need your own legal copy of the PC game. The build scripts extract and convert its assets on your Mac.
 
-![The game window floating in a room on Apple Vision Pro](docs/screenshots/in-room.jpg)
-
-> All screenshots are real captures from the visionOS simulator running this app. They show the UI on backgrounds only. No event CGs are shown.
+![The title screen in a window on Apple Vision Pro](docs/screenshots/title-in-room.jpg)
 
 ## Features
 
@@ -53,7 +51,8 @@ Text speed, auto delay, text size, separate music, effects and voice volumes, mu
 - **Xcode 26 or later** with the visionOS SDK. The project targets visionOS 26.0.
 - Python 3.9+ (standard library only, no `pip install`).
 - Your own copy of **Euphoria** (MangaGamer English PC release). You need its install folder: `euphoria.exe`, `pac/` and optionally `save/`.
-- To run on a headset: an Apple Vision Pro and an Apple developer account (a free one works for personal installs).
+- An **Apple Vision Pro** with Developer Mode on (*Settings › Privacy & Security › Developer Mode*), paired with your Mac in Xcode.
+- An Apple developer account. A free one works for personal installs.
 
 ## Build
 
@@ -93,35 +92,49 @@ tools/convert_movies.sh original/Euphoria/pac visionOS/Euphoria/Resources/Game
 python3 tools/create_xcode_project.py
 ```
 
-### 3. Build and run
+### 3. Set up signing
 
-**Xcode:** open `visionOS/Euphoria.xcodeproj` and pick the *Euphoria* scheme. Choose an Apple Vision Pro simulator or your headset, then Run. For a headset, set your team and a bundle ID of your own (see the note below).
-
-**Command line (simulator):**
-
-```sh
-xcodebuild -project visionOS/Euphoria.xcodeproj -scheme Euphoria -sdk xrsimulator \
-  -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO build
-xcrun simctl install booted .build/DerivedData/Build/Products/Debug-xrsimulator/Euphoria.app
-xcrun simctl launch booted com.euphoria.vision
-```
-
-`create_xcode_project.py` rewrites the project file. If you add a `.swift` file, run it again. Signing changes you make in Xcode are lost when it runs, so pass them to the script instead:
+Generate the project with your team ID and a bundle ID of your own. Your team ID is in Xcode › *Settings › Accounts*, or at developer.apple.com under *Membership*.
 
 ```sh
 DEVELOPMENT_TEAM=ABCDE12345 BUNDLE_ID=com.yourname.euphoria python3 tools/create_xcode_project.py
 ```
 
-## Importing PC saves
+`create_xcode_project.py` rewrites the project file. Run it again with the same variables after you add a `.swift` file. Signing changes made in Xcode's UI are lost when it runs.
 
-Run the app once, then:
+### 4. Build and install on your Vision Pro
+
+**Xcode:** open `visionOS/Euphoria.xcodeproj`, pick the *Euphoria* scheme, choose your Apple Vision Pro as the run destination, then Run. The app bundle is about 3 GB, so the first install takes a while.
+
+**Command line:**
 
 ```sh
-python3 tools/import_saves.py original/Euphoria/save visionOS/Euphoria/Resources/Game/story \
-  "$(xcrun simctl get_app_container booted com.euphoria.vision data)/Documents"
+xcodebuild -project visionOS/Euphoria.xcodeproj -scheme Euphoria \
+  -destination 'generic/platform=visionOS' -derivedDataPath .build/DeviceData \
+  -allowProvisioningUpdates build
+xcrun devicectl list devices
+xcrun devicectl device install app --device "Apple Vision Pro" \
+  .build/DeviceData/Build/Products/Debug-xros/Euphoria.app
+xcrun devicectl device process launch --device "Apple Vision Pro" com.yourname.euphoria
 ```
 
-This converts `saveNNNNN.sd` into slot N. `save10001` becomes the quick save and `save3000N` becomes slot 110+N. It also imports the global flags and the gallery, replay and music unlocks from `gsd.sd`. The app replays the saved scene silently up to the saved line, which rebuilds the background, characters and music. About 98 of 105 test saves import. For a headset, write to a local folder instead and copy the files into the app's `Documents/` with Xcode (*Devices and Simulators › Download/Replace Container*).
+Use your headset's name or identifier from `devicectl list devices`. With a free developer account, the app expires after 7 days. Build and install again to renew it. Your saves stay on the headset.
+
+If the headset shows *Untrusted Developer*, go to *Settings › General › VPN & Device Management* and trust your developer certificate.
+
+## Importing PC saves
+
+Install and open the app once, then convert your PC saves and copy them to the headset:
+
+```sh
+python3 tools/import_saves.py original/Euphoria/save visionOS/Euphoria/Resources/Game/story imported-saves
+xcrun devicectl device copy to --device "Apple Vision Pro" \
+  --domain-type appDataContainer --domain-identifier com.yourname.euphoria \
+  --source imported-saves/Saves --source imported-saves/globals.json --source imported-saves/progress.json \
+  --destination Documents
+```
+
+This converts `saveNNNNN.sd` into slot N. `save10001` becomes the quick save and `save3000N` becomes slot 110+N. It also imports the global flags and the gallery, replay and music unlocks from `gsd.sd`. The app replays the saved scene silently up to the saved line, which rebuilds the background, characters and music. About 98 of 105 test saves import. You can also copy the files with Xcode: *Window › Devices* › your Vision Pro › the app › *Replace Container*.
 
 ## How it works
 
@@ -152,14 +165,14 @@ This is a headless copy of the interpreter. It takes every choice and reports un
 
 `-autostart YES` · `-startLabel 00_op_02` · `-loadSlot slot33` · `-autoAdvance 0.5` · `-choices 0,1` · `-skip YES` · `-traceLines YES` · `-traceSound YES` · `-panel history|save|load|settings|gallery|replays` · `-textHidden YES` · `-titleExtras YES` · `-viewGallerySet 0` · `-replay RP_nem_h01` · `-playMovie op`
 
-Pass them to `xcrun simctl launch booted com.euphoria.vision …` or in the scheme's *Arguments*. Logs go to `Documents/debug.log` in the app container.
+Add them in Xcode under *Product › Scheme › Edit Scheme › Run › Arguments*, or after the bundle ID in `xcrun devicectl device process launch`. Logs go to `Documents/debug.log` in the app container. Download it with `xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle id> --source Documents/debug.log --destination .`
 
 ## Known gaps
 
 - Blend modes, skew and the bonus-game counters aren't implemented yet. Blur and the continuous shake are approximations.
-- Spatial scenes are verified only to fall back to flat art in the simulator. They need checking on a headset.
+- Spatial scenes need more testing on hardware.
 - Some PC saves don't import: a few sit at a menu reached through a jump the importer doesn't follow.
-- Taps and gaze haven't been tested on hardware much.
+- Gaze and pinch targets need more tuning.
 
 ## Working with an AI agent
 

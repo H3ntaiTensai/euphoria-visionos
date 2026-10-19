@@ -11,7 +11,7 @@ A **fully native** visionOS app (Swift, SwiftUI, RealityKit, Metal) that plays t
 ## Hard rules
 
 1. **Never commit game data.** That means nothing from `original/`, `extracted/`, `decompiled/`, `visionOS/Euphoria/Resources/Game/`, `*.ypf`, `*.ybn` or `*.sd` saves, and no game text, art, audio or movies. `.gitignore` covers these. Don't weaken it, and don't `git add -f`. Before every commit, check `git status` and the staged file list.
-2. **No CG in docs or commits.** Screenshots under `docs/screenshots/` must show UI on backgrounds only, never event CGs (`cg/ev*`), the gallery grid or the title key art.
+2. **No CG in docs or commits.** Screenshots under `docs/screenshots/` must show UI on backgrounds only, never event CGs (`cg/ev*`) or the gallery grid. The title screen in `title-in-room.jpg` is the one exception.
 3. **No new dependencies.** The Python tools use the standard library only. The app uses Apple frameworks only, with no Swift packages. Ask the user before adding any.
 4. **Don't hand-edit `visionOS/Euphoria.xcodeproj`.** `tools/create_xcode_project.py` generates it. After adding, removing or renaming a `.swift` or `.metal` file, run `python3 tools/create_xcode_project.py`. Pass `DEVELOPMENT_TEAM` and `BUNDLE_ID` as environment variables, never hard-code them.
 5. **Match the original.** Timing, easing, layout (the 1024×768 stage coordinates) and branching should follow the original scripts. If you're unsure how a call behaves, read the decompiled ERIS source (see below) before guessing.
@@ -57,13 +57,19 @@ Git ignores these local folders, but they exist on the user's machine after a bu
 
 From the repo root (the full first-time pipeline is in README.md › Build):
 
+The app targets a physical Apple Vision Pro. Ask the user for their team ID, bundle ID and headset name if you don't know them, and never commit them.
+
 ```sh
-python3 tools/create_xcode_project.py
-xcodebuild -project visionOS/Euphoria.xcodeproj -scheme Euphoria -sdk xrsimulator \
-  -derivedDataPath .build/DerivedData CODE_SIGNING_ALLOWED=NO build
-xcrun simctl install booted .build/DerivedData/Build/Products/Debug-xrsimulator/Euphoria.app
-xcrun simctl launch booted com.euphoria.vision -autostart YES
+DEVELOPMENT_TEAM=<team> BUNDLE_ID=<bundle id> python3 tools/create_xcode_project.py
+xcodebuild -project visionOS/Euphoria.xcodeproj -scheme Euphoria \
+  -destination 'generic/platform=visionOS' -derivedDataPath .build/DeviceData \
+  -allowProvisioningUpdates build
+xcrun devicectl list devices
+xcrun devicectl device install app --device "<headset>" .build/DeviceData/Build/Products/Debug-xros/Euphoria.app
+xcrun devicectl device process launch --device "<headset>" <bundle id> -autostart YES
 ```
+
+The headset must be awake, unlocked, in Developer Mode and paired with the Mac. If `devicectl` can't reach it, tell the user. Don't retry in a loop.
 
 If you change `tools/build_story.py` or `tools/yuris.py`, regenerate the story JSON:
 
@@ -82,13 +88,16 @@ If `Resources/Game/` is missing, the user hasn't run the asset pipeline. Tell th
    python3 tools/explore_routes.py visionOS/Euphoria/Resources/Game/story --replays
    ```
    The baseline is 456/457 scripts reached, all six movies, no problems, and 78/78 replays clean. `explore_routes.py` mirrors the Swift interpreter. If you change flow semantics in `StoryEngine.swift`, make the same change there.
-3. **It looks right.** Drive the simulator without input using the debug launch arguments, then screenshot:
+3. **It looks right.** Launch on the headset with the debug launch arguments to jump straight to the scene you changed, then ask the user to check it in the headset:
    ```sh
-   xcrun simctl launch booted com.euphoria.vision -autostart YES -autoAdvance 1 -choices 1
-   xcrun simctl io booted screenshot /tmp/shot.png
+   xcrun devicectl device process launch --device "<headset>" <bundle id> -startLabel <label> -autoAdvance 1 -traceLines YES
    ```
-   The arguments are `-autostart YES`, `-startLabel <label>`, `-loadSlot <slot>`, `-autoAdvance <sec>`, `-choices 0,1`, `-skip YES`, `-traceLines YES`, `-traceSound YES`, `-panel history|save|load|settings|gallery|replays`, `-textHidden YES`, `-titleExtras YES`, `-viewGallerySet N`, `-replay <label>` and `-playMovie <name>`. They're implemented in `DebugAutomation` in `GameView.swift` and work in Debug builds only. Logs go to `Documents/debug.log` in the container: `xcrun simctl get_app_container booted com.euphoria.vision data`.
-4. **Say what you couldn't check.** The simulator can't generate spatial scenes, and it doesn't really test gaze and pinch input. Say when a change needs a headset to confirm.
+   The arguments are `-autostart YES`, `-startLabel <label>`, `-loadSlot <slot>`, `-autoAdvance <sec>`, `-choices 0,1`, `-skip YES`, `-traceLines YES`, `-traceSound YES`, `-panel history|save|load|settings|gallery|replays`, `-textHidden YES`, `-titleExtras YES`, `-viewGallerySet N`, `-replay <label>` and `-playMovie <name>`. They're implemented in `DebugAutomation` in `GameView.swift` and work in Debug builds only. Logs go to `Documents/debug.log` in the app container. Pull it with:
+   ```sh
+   xcrun devicectl device copy from --device "<headset>" --domain-type appDataContainer \
+     --domain-identifier <bundle id> --source Documents/debug.log --destination .build/
+   ```
+4. **Say what you couldn't check.** You can't see the headset's display. Say clearly which visual, spatial-scene and gaze/pinch behavior the user still needs to confirm by looking.
 
 ## Conventions
 
@@ -104,7 +113,7 @@ If `Resources/Game/` is missing, the user hasn't run the asset pipeline. Tell th
 - Blend modes, skew, and the bonus-game counters in `Eris.swift`.
 - More faithful blur and continuous shake.
 - `import_saves.py`: follow the jump that leaves some PC saves at a menu.
-- Hardware polish: gaze/pinch targets, comfort, and spatial scene timing on a real Vision Pro.
+- Hardware polish: gaze/pinch targets, comfort, and spatial scene timing.
 
 ## Git
 
