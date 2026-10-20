@@ -44,10 +44,15 @@ Text speed, auto delay, text size, the original's skip options (only skip alread
 
 ![The settings panel](docs/screenshots/settings.jpg)
 
+### Bonus menu
+
+CG gallery, scene replay, music replay and staff comments, redesigned for visionOS. The sections sit in a tab ornament beside the window, and the original's character tiles scroll on a glass slab across its top. Gallery and scene replay group entries by character, as the original does, with the character's portrait beside them. The gallery has a Spatial on/off switch and a Previous / Next bar for each set, and music replay has a now-playing bar. The menus use a light glass with the original's white room faded into it. The bonus menu opens after your first ending, as in the original. Pictures, scenes and comments unlock as you play or by importing the PC's `gsd.sd`; every music track is open. Settings › Classic Bonus Menu switches to the original PC layout.
+
+![The bonus menu's scene replay, with thumbnails blurred](docs/screenshots/bonus-menu.jpg)
+
 ### Also included
 
 - **Effects at the original's timing.** Sprite tweens and easing, quakes, flashes, fades, and rule-mask transitions (a Metal shader).
-- **Bonus menu.** CG gallery, scene replay, music room and staff comments. It opens after your first ending, as in the original. Pictures, scenes and comments unlock as you play or by importing the PC's `gsd.sd`; every music track is open, as in the original. Gallery and scene replay group entries by character, as the original does, using its character tiles on a scrolling glass slab. The gallery has a Spatial on/off switch, and music replay has a now-playing bar. Settings › Classic Bonus Menu switches to the original PC layout.
 - **Movies.** The opening and five ending movies, converted to H.264.
 
 ## Requirements
