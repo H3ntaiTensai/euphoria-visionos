@@ -14,6 +14,12 @@ The game runs in a rounded 4:3 window on the original's 1024×768 stage. Dialogu
 
 ![Dialogue on the stage](docs/screenshots/dialogue.jpg)
 
+### Spatial scenes
+
+Full-screen backgrounds and event CGs become visionOS spatial scenes behind the window, generated on the device. Move your head and the room has real depth behind the characters. Upcoming pictures are queued and generated ahead, so most are ready by the time the story reaches them. Flashback scenes keep their sepia tint, and event CGs that show as spatial scenes change at once instead of fading. Settings › Spatial Scenes turns them off.
+
+![A spatial scene: the background shifts in depth behind Nemu as the viewpoint moves](docs/screenshots/spatial-scene.gif)
+
 ### Choices
 
 The original's branches, variables and jumps are interpreted directly, so every route and all six endings play. Text choices appear as glass buttons. The heroine selection screen uses the original's art.
@@ -34,15 +40,14 @@ A scrolling backlog of every line, with the choices you took marked. Tap the spe
 
 ### Settings
 
-Text speed, auto delay, text size, separate music, effects and voice volumes, mute, and scene options such as spatial scenes.
+Text speed, auto delay, text size, the original's skip options (only skip already-read text, keep skipping after choices), separate music, effects and voice volumes, mute, the original's content options (gory, waste matter and orgasm expression CG variants), and scene options such as spatial scenes.
 
 ![The settings panel](docs/screenshots/settings.jpg)
 
 ### Also included
 
 - **Effects at the original's timing.** Sprite tweens and easing, quakes, flashes, fades, and rule-mask transitions (a Metal shader).
-- **Spatial scenes.** Full-screen backgrounds and event CGs can become visionOS spatial scenes behind the window. They are generated on the device. Settings › Spatial Scenes turns them off.
-- **Bonus menu.** CG gallery, scene replay, music room and staff comments, unlocked as you play or by importing the PC's `gsd.sd`.
+- **Bonus menu.** CG gallery, scene replay, music room and staff comments. It opens after your first ending, as in the original. Pictures, scenes and comments unlock as you play or by importing the PC's `gsd.sd`; every music track is open, as in the original. Gallery and scene replay group entries by character, as the original does, using its character tiles on a scrolling glass slab. The gallery has a Spatial on/off switch, and music replay has a now-playing bar. Settings › Classic Bonus Menu switches to the original PC layout.
 - **Movies.** The opening and five ending movies, converted to H.264.
 
 ## Requirements
@@ -146,7 +151,7 @@ This converts `saveNNNNN.sd` into slot N. `save10001` becomes the quick save and
 | Interpreter | [StoryEngine.swift](visionOS/Euphoria/StoryEngine.swift) | Runs the JSON: branches, variables, choices, saves, auto and skip. |
 | ERIS framework | [Eris.swift](visionOS/Euphoria/Eris.swift) | About 50 calls the story makes: `MAC.BG`/`EV`/`FOUT`/`FIN`/`FLASH`, the `es.SP.*` sprite builder, `es.SND`, choices, heroine selection. |
 | Stage | [Stage.swift](visionOS/Euphoria/Stage.swift), [StageView.swift](visionOS/Euphoria/StageView.swift), [Shaders.metal](visionOS/Euphoria/Shaders.metal) | Layers, tweens, rule-mask transitions. |
-| UI | [GameView.swift](visionOS/Euphoria/GameView.swift), [Panels.swift](visionOS/Euphoria/Panels.swift), [Extras.swift](visionOS/Euphoria/Extras.swift) | Window, dialogue, ornament, panels, bonus menu. |
+| UI | [GameView.swift](visionOS/Euphoria/GameView.swift), [Panels.swift](visionOS/Euphoria/Panels.swift), [Extras.swift](visionOS/Euphoria/Extras.swift), [BonusRoom.swift](visionOS/Euphoria/BonusRoom.swift) | Window, dialogue, ornament, panels, bonus menu. |
 | Spatial | [SpatialScenes.swift](visionOS/Euphoria/SpatialScenes.swift) | On-device spatial scenes for full-screen art. |
 | Audio / saves | [AudioDirector.swift](visionOS/Euphoria/AudioDirector.swift), [Persistence.swift](visionOS/Euphoria/Persistence.swift) | Sound channels; slots, globals, unlocks. |
 
@@ -163,7 +168,7 @@ This is a headless copy of the interpreter. It takes every choice and reports un
 
 ### Debug launch arguments (Debug builds)
 
-`-autostart YES` · `-startLabel 00_op_02` · `-loadSlot slot33` · `-autoAdvance 0.5` · `-choices 0,1` · `-skip YES` · `-traceLines YES` · `-traceSound YES` · `-panel history|save|load|settings|gallery|replays` · `-textHidden YES` · `-titleExtras YES` · `-viewGallerySet 0` · `-replay RP_nem_h01` · `-playMovie op`
+`-autostart YES` · `-startLabel 00_op_02` · `-loadSlot slot33` · `-autoAdvance 0.5` · `-choices 0,1` · `-skip YES` · `-traceLines YES` · `-traceSound YES` · `-panel history|save|load|settings|gallery|replays|music|staff` · `-textHidden YES` · `-titleExtras YES` · `-viewGallerySet 0` · `-bonusGroup 3` · `-playTrack 0` · `-replay RP_nem_h01` · `-playMovie op`
 
 Add them in Xcode under *Product › Scheme › Edit Scheme › Run › Arguments*, or after the bundle ID in `xcrun devicectl device process launch`. Logs go to `Documents/debug.log` in the app container. Download it with `xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle id> --source Documents/debug.log --destination .`
 

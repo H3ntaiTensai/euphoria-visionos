@@ -21,7 +21,8 @@ struct Tween: Codable, Equatable, Sendable {
     var end: TimeInterval { start + duration }
 
     func value(at time: TimeInterval) -> Double {
-        guard duration > 0 else { return to }
+        // A change queued for later (a sprite event queue) holds its start value until then.
+        guard duration > 0 else { return time < start ? from : to }
         let p = min(max((time - start) / duration, 0), 1)
         let eased: Double = curve > 0 ? 1 - (1 - p) * (1 - p) : curve < 0 ? p * p : p
         return from + (to - from) * eased
@@ -47,7 +48,7 @@ struct Quake: Codable, Equatable, Sendable {
 }
 
 /// The camera tint a picture was loaded under (es.CM.SD / es.CM.MD).
-struct Tint: Codable, Equatable, Sendable {
+struct Tint: Codable, Hashable, Sendable {
     /// The original's saturation, 128 = unchanged.
     var saturation: Int
     /// Per-channel brightness as 0xRRGGBB, 0x808080 = unchanged.
@@ -97,15 +98,20 @@ struct Sprite: Codable, Equatable, Identifiable, Sendable {
     /// Blur in the original's units (es.SP.BX / BY); nil is sharp.
     var blur: Tween?
     var sway: Sway?
+    /// es.SP.NOP.SET: the sprite counts as busy until then (es.SP.WA.SET waits for it).
+    var holdUntil: TimeInterval?
 
     var busyUntil: TimeInterval {
-        [fade.end, alpha.end, x.end, y.end, z.end, blur?.end ?? 0, quake.map { $0.start + $0.duration } ?? 0].max() ?? 0
+        [fade.end, alpha.end, x.end, y.end, z.end, blur?.end ?? 0, quake.map { $0.start + $0.duration } ?? 0,
+         holdUntil ?? 0].max() ?? 0
     }
 
     /// A background or event CG shown full screen and still: the moments a
     /// spatial scene can stand in for the flat picture.
     func isStillBackground(at time: TimeInterval) -> Bool {
-        guard id == "BG", let image, previous == nil, tint == nil, blur == nil, sway == nil, quake == nil,
+        // A finished crossfade leaves `previous` set; once busyUntil has passed, the old
+        // picture is no longer drawn. A camera tint is baked into the scene.
+        guard id == "BG", let image, blur == nil, sway == nil, quake == nil,
               busyUntil <= time else { return false }
         return alpha.to >= 256 && abs(x.to) < 0.5 && abs(y.to) < 0.5 && abs(z.to - Screen.baseDepth) < 0.5
             && SpatialSceneLibrary.isEligible(image)
@@ -121,6 +127,7 @@ struct Sprite: Codable, Equatable, Identifiable, Sendable {
         copy.z = z.settled
         copy.quake = nil
         copy.blur = blur?.settled
+        copy.holdUntil = nil
         return copy
     }
 }

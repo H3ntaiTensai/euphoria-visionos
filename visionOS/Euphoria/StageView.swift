@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -5,6 +6,7 @@ import UIKit
 final class ArtLibrary: @unchecked Sendable {
     static let shared = ArtLibrary()
     private let cache = NSCache<NSString, UIImage>()
+    private let sizes = NSCache<NSString, NSValue>()
 
     init() { cache.countLimit = 80 }
 
@@ -18,6 +20,20 @@ final class ArtLibrary: @unchecked Sendable {
         let image = UIImage(cgImage: part)
         cache.setObject(image, forKey: key)
         return image
+    }
+
+    /// A picture's size in pixels, read from the file's header without decoding it.
+    func pixelSize(_ name: String) -> CGSize? {
+        let key = name.lowercased() as NSString
+        if let size = sizes.object(forKey: key) { return size.cgSizeValue }
+        guard let url = StoryLibrary.shared.assetURL(name),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let size = CGSize(width: width, height: height)
+        sizes.setObject(NSValue(cgSize: size), forKey: key)
+        return size
     }
 
     func image(_ name: String) -> UIImage? {
@@ -52,6 +68,8 @@ struct StageView: View {
     var settings = Settings.shared
     @Environment(\.stageFlattened) private var flattened
     @State private var animating = false
+    /// Pictures showing as spatial scenes; what is under them is cleared (see SpatialShowingKey).
+    @State private var spatialShowing: Set<String> = []
 
     var body: some View {
         GeometryReader { proxy in
@@ -59,14 +77,20 @@ struct StageView: View {
             TimelineView(.animation(minimumInterval: nil, paused: !animating)) { _ in
                 let time = Date.timeIntervalSinceReferenceDate
                 let sprites = stage.ordered
+                // The lowest layer showing as a spatial scene: nothing under it may be opaque.
+                let spatialFloor = spatialShowing.isEmpty ? nil
+                    : sprites.firstIndex { $0.image.map(spatialShowing.contains) ?? false }
                 ZStack(alignment: .topLeading) {
                     Color.black.clipShape(.rect(cornerRadius: Self.cornerRadius))
+                        .opacity(spatialFloor == nil ? 1 : 0)
                     ForEach(Array(sprites.enumerated()), id: \.element.id) { index, sprite in
                         let depth = depth(of: sprite, index: index, count: sprites.count)
                         Group {
                             if spatial, settings.spatialScenes, sprite.isStillBackground(at: time), let image = sprite.image {
                                 // Backgrounds and event CGs become spatial scenes behind the window.
-                                SpatialPicture(name: image)
+                                // Event CGs change at once, as in the CG gallery.
+                                SpatialPicture(name: image, tint: sprite.tint,
+                                               fades: !(image as NSString).lastPathComponent.lowercased().hasPrefix("ev_"))
                             } else {
                                 SpriteView(sprite: sprite, time: time, scale: scale)
                             }
@@ -75,6 +99,7 @@ struct StageView: View {
                             // Clip before moving forward: layers in front of the window aren't clipped by it.
                             .clipShape(.rect(cornerRadius: Self.cornerRadius))
                             .inFrontOfWindow(by: depth)
+                            .opacity(spatialFloor.map { index < $0 } == true ? 0 : 1)
                     }
                 }
             }
@@ -94,6 +119,7 @@ struct StageView: View {
             try? await Task.sleep(for: .seconds(remaining + 0.05))
             if !Task.isCancelled { animating = false }
         }
+        .onPreferenceChange(SpatialShowingKey.self) { spatialShowing = $0 }
         .accessibilityHidden(true)
     }
 

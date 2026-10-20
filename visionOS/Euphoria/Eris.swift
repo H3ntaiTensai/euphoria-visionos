@@ -13,6 +13,10 @@ struct TweenSpec {
 /// tween calls fill it in, es.SP.SET.SET applies it to a named sprite.
 struct PendingSprite {
     var image: String?
+    /// es.SP.CG.SET's picture type (2 is an event CG), or 5 for a character (ST.SET).
+    var imageType: Int?
+    /// es.SP.ST_G.SET: a character pose with a gore variant.
+    var cutinFlagged = false
     /// es.SP.ST.SET: crossfade a character's new pose over this many milliseconds.
     var crossfadeMs: Double?
     var alpha: TweenSpec?
@@ -50,8 +54,11 @@ extension StoryEngine {
         // Building sprites.
         case "es.SP.CG.SET":
             pending.image = args.string(2)
+            pending.imageType = args.int(1)
         case "es.SP.ST.SET", "es.SP.ST_G.SET":
             pending.image = args.string(2)
+            pending.imageType = 5
+            pending.cutinFlagged = name == "es.SP.ST_G.SET"
             pending.crossfadeMs = args.double(3)
         case "es.SP.A.SET": pending.alpha = tween(args, 1)
         case "es.SP.X.SET": pending.x = tween(args, 1)
@@ -66,11 +73,11 @@ extension StoryEngine {
         case "es.SP.CLX.SET": pending.swayX = (args.double(1), args.double(2))
         case "es.SP.CLY.SET": pending.swayY = (args.double(1), args.double(2))
         case "es.SP.SET.SET":
-            commit(args.string(1))
+            commit(args.string(1), event: args.string(2))
         case "es.SP.WA.SET":
-            if let sprite = stage.sprites[args.string(1)] {
-                await pause(until: sprite.busyUntil)
-            }
+            let name = args.string(1)
+            let busy = max(stage.sprites[name]?.busyUntil ?? 0, spriteHolds[name] ?? 0)
+            await pause(until: busy)
         case "es.SP.DEL.SET":
             stage.sprites[args.string(1)] = nil
         case "es.SP.DELALL.SET", "es.SP.DELALL2.SET":
@@ -81,23 +88,28 @@ extension StoryEngine {
 
         // Scene macros.
         case "MAC.BG":
+            vars.set(Self.cutinMode, [94, 6], .int(0))
             await showBackground(args.string(1), kind: "bg", z: args.double(2, -1), ms: args.int(3, -1),
                                  rule: args.string(4))
         case "MAC.EV":
-            await showBackground(args.string(1), kind: "ev", z: args.double(2, -1), ms: args.int(3, -1),
+            vars.set(Self.cutinMode, [94, 6], .int(args.int(9)))
+            await showBackground(cutinVariant(args.string(1), type: 2), kind: "ev", z: args.double(2, -1), ms: args.int(3, -1),
                                  rule: args.string(4))
             if args.int(8) != 0 {
                 pending = PendingSprite(image: "ev/\(args.string(1))_w")
                 commit("EV_W")
             }
         case "MAC.BG_C", "MAC.EV_C", "MAC.EV_G_C", "MAC.EV_G_O_C", "MAC.EV_G_A_C":
+            if let mode = ["MAC.EV_G_C": 1, "MAC.EV_G_O_C": 2, "MAC.EV_G_A_C": 3][name] {
+                vars.set(Self.cutinMode, [94, 6], .int(mode))
+            }
             var bg = stage.sprite(named: "BG")
-            bg.image = args.string(1)
+            bg.image = name.hasPrefix("MAC.EV") ? cutinVariant(args.string(1), type: 2) : args.string(1)
             bg.tint = vars.tint
             bg.previous = nil
             bg.fade = .constant(1)
             stage.sprites["BG"] = bg
-            if name.hasPrefix("MAC.EV") { Progress.shared.sawCG(args.string(1)) }
+            if name.hasPrefix("MAC.EV"), let image = bg.image { Progress.shared.sawCG(image) }
         case "MAC.FOUT":
             line = nil
             var cover = stage.sprite(named: "LNO_FD")
@@ -143,14 +155,13 @@ extension StoryEngine {
             if catchingUp {
                 // Rebuilding an imported save's scene: remember the music, play nothing.
                 if file.isEmpty { catchUpMusic[channel] = nil }
-                else if args.int(5, 1) < 0, !AudioDirector.isLineVoice(channel) { catchUpMusic[channel] = .init(file: file, volume: args.int(4, -1) < 0 ? 1 : Float(args.int(4)) / 256, loops: true) }
+                else if AudioDirector.plays(channel: channel, loop: args.int(5, -1)) == 0 { catchUpMusic[channel] = .init(file: file, volume: args.int(4, -1) < 0 ? 1 : Float(args.int(4)) / 256, loops: true) }
                 return
             }
-            if AudioDirector.kind(of: channel) == .bgm, !file.isEmpty {
-                Progress.shared.heardTrack(library.index.bgm[file.lowercased()] ?? file)
-            }
-            guard !(skipping && AudioDirector.kind(of: channel) == .voice) else { return }
-            audio.play(channel: channel, file: file, fadeMs: args.int(3), volume: args.int(4, -1), loop: args.int(5, 1))
+            // Skipping starts no voices, as the original, but still stops them: a dropped
+            // stop would leave a background voice looping under every line after it.
+            guard !(skipping && AudioDirector.kind(of: channel) == .voice && !file.isEmpty) else { return }
+            audio.play(channel: channel, file: file, fadeMs: args.int(3), volume: args.int(4, -1), loop: args.int(5, -1))
 
         // Choices.
         case "ES.SEL.GO":
@@ -203,21 +214,30 @@ extension StoryEngine {
         }
     }
 
-    /// es.SP.SET.SET: apply what was built to the named sprite.
-    func commit(_ name: String) {
-        let time = now
-        let isNew = stage.sprites[name] == nil
+    /// es.SP.SET.SET: apply what was built to the named sprite. With an event name
+    /// ("E01"), the change waits until the earlier changes under that name are done,
+    /// as the original's sprite queue runs them one after another.
+    func commit(_ name: String, event: String = "") {
+        let time = event.isEmpty ? now : max(now, eventQueues[event] ?? now)
+        var end = time
+        func lasts(_ seconds: Double) { end = max(end, time + seconds) }
+        let existing = stage.sprites[name]
         var sprite = stage.sprite(named: name)
-        if let image = pending.image {
+        // A character returning after es.SP.DEL.SET (or never drawn) fades in as a new one.
+        let appearing = sprite.image == nil
+        if let requested = pending.image {
+            let image = pending.imageType.map { cutinVariant(requested, type: $0, flagged: pending.cutinFlagged) } ?? requested
             let fadeMs = pending.crossfadeMs ?? pending.transition?.ms ?? 0
-            if !isNew, let old = sprite.image, old.lowercased() != image.lowercased() {
+            if let old = sprite.image, old.lowercased() != image.lowercased() {
                 sprite.previous = old
                 sprite.fade = Tween(from: 0, to: 1, start: time, duration: seconds(fadeMs))
+                lasts(seconds(fadeMs))
             } else {
                 sprite.previous = nil
                 sprite.fade = .constant(1)
-                if isNew, pending.alpha == nil, pending.transition == nil, let ms = pending.crossfadeMs {
+                if appearing, pending.alpha == nil, pending.transition == nil, let ms = pending.crossfadeMs {
                     sprite.alpha = Tween(from: 0, to: 256, start: time, duration: seconds(ms))
+                    lasts(seconds(ms))
                 }
             }
             sprite.image = image
@@ -226,13 +246,17 @@ extension StoryEngine {
                 Progress.shared.sawCG(image)
             }
         }
-        sprite.rule = pending.rule ?? sprite.rule
+        // A transition mask belongs to the change it came with (es.SP.TR.SET is per change).
+        if pending.rule != nil || pending.alpha != nil || pending.transition != nil || pending.image != nil {
+            sprite.rule = pending.rule
+        }
         func apply(_ spec: TweenSpec?, _ keyPath: WritableKeyPath<Sprite, Tween>) {
             guard let spec else { return }
             let current = sprite[keyPath: keyPath].value(at: time)
             let from = spec.from ?? current
             let to = spec.relative ? current + spec.to : spec.to
             sprite[keyPath: keyPath] = Tween(from: from, to: to, start: time, duration: seconds(spec.ms), curve: spec.curve)
+            lasts(seconds(spec.ms))
         }
         apply(pending.alpha, \.alpha)
         apply(pending.x, \.x)
@@ -242,27 +266,63 @@ extension StoryEngine {
             // A rule transition on its own: reveal (0→256) or hide (256→0) the sprite.
             let from = transition.from.map { min($0, 256) } ?? sprite.alpha.value(at: time)
             sprite.alpha = Tween(from: from, to: min(transition.to, 256), start: time, duration: seconds(transition.ms))
+            lasts(seconds(transition.ms))
         }
         if pending.quakeX != nil || pending.quakeY != nil {
-            let duration = max(pending.quakeX?.ms ?? 0, pending.quakeY?.ms ?? 0)
+            let duration = seconds(max(pending.quakeX?.ms ?? 0, pending.quakeY?.ms ?? 0))
             sprite.quake = Quake(x: pending.quakeX?.amplitude ?? 0, y: pending.quakeY?.amplitude ?? 0,
-                                 start: time, duration: seconds(duration))
+                                 start: time, duration: duration)
+            lasts(duration)
         }
         if let spec = pending.blur {
             let current = sprite.blur?.value(at: time) ?? 0
             sprite.blur = Tween(from: spec.from ?? current, to: spec.relative ? current + spec.to : spec.to,
                                 start: time, duration: seconds(spec.ms), curve: spec.curve)
+            lasts(seconds(spec.ms))
         }
         if pending.swayX != nil || pending.swayY != nil {
             let period = max(pending.swayX?.ms ?? 0, pending.swayY?.ms ?? 0) / 1000
             sprite.sway = Sway(x: pending.swayX?.amplitude ?? 0, y: pending.swayY?.amplitude ?? 0,
                                period: max(period, 0.05), start: time)
         }
-        if let hold = pending.holdMs {
-            sprite.fade.duration = max(sprite.fade.duration, (time - sprite.fade.start) + seconds(hold))
+        // es.SP.NOP.SET: the change takes this long without doing anything.
+        if let hold = pending.holdMs { lasts(seconds(hold)) }
+        if !event.isEmpty { eventQueues[event] = max(eventQueues[event] ?? 0, end) }
+        if sprite.image == nil, existing?.image == nil {
+            // Nothing to draw (a pause queued on a deleted sprite): es.SP.WA.SET still waits for it.
+            spriteHolds[name] = max(spriteHolds[name] ?? 0, end)
+        } else {
+            if pending.holdMs != nil { sprite.holdUntil = max(sprite.holdUntil ?? 0, end) }
+            stage.sprites[name] = sprite
         }
-        stage.sprites[name] = sprite
         pending = PendingSprite()
+    }
+
+    /// @1143(94, 6): which variant table event CGs are looked up in. MAC.EV's ninth
+    /// argument sets it, as do MAC.EV_G_C (1), MAC.EV_G_O_C (2) and MAC.EV_G_A_C (3);
+    /// MAC.BG clears it.
+    static let cutinMode = "@1143"
+
+    /// es.SP.CUTIN.CHECK: the variant of a picture the content options ask for. Event CGs
+    /// use the table the scene picked (gore, feces or orgasm); es.SP.ST_G.SET poses use
+    /// the gore one. Showing any variant unlocks them all in the CG gallery, as in the original.
+    func cutinVariant(_ name: String, type: Int, flagged: Bool = false, mode: Int? = nil, unlock: Bool = true) -> String {
+        guard let tables = library.index.cutins else { return name }
+        let kind: String? = switch type {
+        case 2: [1: "gore", 2: "feces", 3: "orgasm"][mode ?? vars.get(Self.cutinMode, [94, 6]).integer]
+        case 5: flagged ? "gore" : nil
+        default: nil
+        }
+        let key = name.lowercased()
+        guard let kind, let group = tables[kind]?.first(where: { $0.contains(key) }) else { return name }
+        if unlock { group.forEach(Progress.shared.sawCG) }
+        let gore = settings.goreVariants
+        let pick = switch kind {
+        case "feces": (gore ? 0 : 2) + (settings.fecesVariants ? 0 : 1)
+        case "orgasm": (gore ? 0 : 2) + (settings.orgasmVariants ? 0 : 1)
+        default: gore ? 0 : 1
+        }
+        return pick < group.count ? group[pick] : name
     }
 
     private func removeAll(keeping names: Set<String>) {
@@ -271,29 +331,36 @@ extension StoryEngine {
     }
 
     /// MAC.BG / MAC.EV: the new picture fades in over everything, then replaces the scene.
+    /// An event CG that shows as a spatial scene changes at once instead, as in the CG
+    /// gallery: a fade would draw the flat picture over the scene's depth.
     private func showBackground(_ file: String, kind: String, z: Double, ms: Int, rule: String) async {
         line = nil
-        let time = now
-        var front = stage.sprite(named: "BGF")
-        front.image = file
-        front.tint = vars.tint
-        front.previous = nil
-        front.fade = .constant(1)
-        front.rule = rule.isEmpty ? nil : rule
-        front.z = .constant(z < 0 ? Screen.baseDepth : z)
-        front.alpha = Tween(from: 0, to: 256, start: time, duration: seconds(Double(ms < 0 ? 500 : ms)))
-        stage.sprites["BGF"] = front
+        let depth = Tween.constant(z < 0 ? Screen.baseDepth : z)
+        let spatial = kind == "ev" && settings.spatialScenes && SpatialSceneLibrary.shared.isSupported
+            && SpatialSceneLibrary.isEligible(file)
+        if !spatial {
+            var front = stage.sprite(named: "BGF")
+            front.image = file
+            front.tint = vars.tint
+            front.previous = nil
+            front.fade = .constant(1)
+            front.rule = rule.isEmpty ? nil : rule
+            front.z = depth
+            front.alpha = Tween(from: 0, to: 256, start: now, duration: seconds(Double(ms < 0 ? 500 : ms)))
+            stage.sprites["BGF"] = front
+            await pause(until: front.busyUntil)
+        }
         if kind == "ev" { Progress.shared.sawCG(file) }
-        await pause(until: front.busyUntil)
         var background = stage.sprite(named: "BG")
         background.image = file
-        background.tint = front.tint
+        background.tint = vars.tint
         background.previous = nil
+        background.rule = nil
         background.fade = .constant(1)
         background.alpha = .constant(256)
         background.x = .constant(0)
         background.y = .constant(0)
-        background.z = front.z
+        background.z = depth
         background.quake = nil
         stage.sprites = stage.sprites.filter { ["LNO_FD", "MAC_FLASH"].contains($0.key) }
         stage.sprites["BG"] = background
@@ -308,12 +375,15 @@ extension StoryEngine {
         }
         guard !options.isEmpty else { return }
         abandonCatchUp()
+        let wasSkipping = skipping
         skipping = false
         markSavePoint(at: here)
         choices = options
         let picked = await waitForChoice()
         choices = nil
         guard picked >= 0, picked < selection.labels.count else { return }
+        // "Maintain skip-mode after choices" (on in the original by default).
+        if wasSkipping, settings.keepSkippingAfterChoices { skipping = true }
         if let option = options.first(where: { $0.index == picked }) {
             history.append(Line(name: nil, who: nil, text: "▸ \(option.text)", voice: nil))
         }
@@ -331,6 +401,7 @@ extension StoryEngine {
         }
         guard !buttons.isEmpty else { return }
         abandonCatchUp()
+        let wasSkipping = skipping
         skipping = false
         markSavePoint(at: here)
         line = nil
@@ -338,6 +409,7 @@ extension StoryEngine {
         let picked = await waitForChoice()
         pictureChoices = nil
         guard picked > 0 else { return }
+        if wasSkipping, settings.keepSkippingAfterChoices { skipping = true }
         vars.set("@1143", [93, 5], .int(picked))
     }
 

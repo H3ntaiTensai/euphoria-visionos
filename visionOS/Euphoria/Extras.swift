@@ -47,122 +47,211 @@ struct MoviePlayerView: UIViewRepresentable {
     }
 }
 
-/// The CG gallery: the original's sets, each opening its unlocked pictures.
-struct GalleryPanel: View {
-    @Binding var viewing: [String]?
-    private let progress = Progress.shared
+/// The CG gallery: the original's sets under their character tabs, each opening
+/// its unlocked pictures.
+struct GalleryRoom: View {
+    let open: (Panel) -> Void
+    let close: () -> Void
+    @State private var viewing: [String]?
     private let sets = StoryLibrary.shared.index.gallery
-    @Environment(\.uiScale) private var scale
+    private let progress = Progress.shared
 
     var body: some View {
         let seen = progress.seenCG
-        let unlocked = sets.filter { set in set.pictures.contains(where: seen.contains) }.count
-        VStack(alignment: .leading, spacing: 14 * scale) {
-            Text("\(unlocked) of \(sets.count) unlocked")
-                .font(.system(size: 20 * scale))
-                .foregroundStyle(.secondary)
-            ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14 * scale), count: 4),
-                          spacing: 14 * scale) {
-                    ForEach(sets) { set in
-                        let pictures = set.pictures.filter(seen.contains)
-                        ThumbnailButton(art: "thumb_cg/\(set.thumb)", locked: pictures.isEmpty,
-                                        caption: pictures.isEmpty ? nil : "\(pictures.count)/\(set.pictures.count)") {
-                            viewing = pictures
-                        }
-                    }
+        let pictures = sets.flatMap(\.pictures)
+        ZStack {
+            CharacterAlbum(room: .gallery, open: open, close: close,
+                           counts: (pictures.filter(seen.contains).count, pictures.count),
+                           items: sets.map(\.group)) { index, scale in
+                let set = sets[index]
+                let unlocked = set.pictures.filter(seen.contains)
+                AlbumThumbnail(art: "thumb_cg/\(set.thumb)", locked: unlocked.isEmpty,
+                               label: "\(unlocked.count) of \(set.pictures.count) pictures", scale: scale) {
+                    viewing = unlocked
                 }
             }
+            .opacity(viewing == nil ? 1 : 0)
+            if let viewing {
+                PictureViewer(pictures: viewing) { self.viewing = nil }
+                    .transition(.opacity)
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: viewing)
+        #if DEBUG
+        .task {
+            // `-viewGallerySet 0`: open a gallery set's pictures.
+            guard let value = UserDefaults.standard.string(forKey: "viewGallerySet"), let index = Int(value) else { return }
+            viewing = sets[index].pictures.filter(progress.seenCG.contains)
+        }
+        #endif
     }
 }
 
-/// The scene replay list.
-struct ReplayPanel: View {
+/// Scene Replay: the original's scenes under their character tabs.
+struct ReplayRoom: View {
     let engine: StoryEngine
+    let open: (Panel) -> Void
     let close: () -> Void
-    private let progress = Progress.shared
     private let replays = StoryLibrary.shared.index.replays
-    @Environment(\.uiScale) private var scale
+    private let progress = Progress.shared
 
     var body: some View {
         let unlocked = progress.replays
-        VStack(alignment: .leading, spacing: 14 * scale) {
-            Text("\(replays.filter { unlocked.contains($0.label) }.count) of \(replays.count) unlocked")
-                .font(.system(size: 20 * scale))
-                .foregroundStyle(.secondary)
-            ScrollView {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14 * scale), count: 4),
-                          spacing: 14 * scale) {
-                    ForEach(replays) { replay in
-                        ThumbnailButton(art: "thumb_rp/\(replay.thumb)", locked: !unlocked.contains(replay.label),
-                                        caption: nil) {
-                            close()
-                            engine.startReplay(replay.label)
-                        }
-                    }
-                }
+        CharacterAlbum(room: .replays, open: open, close: close,
+                       counts: (replays.filter { unlocked.contains($0.label) }.count, replays.count),
+                       items: replays.map(\.group)) { index, scale in
+            let replay = replays[index]
+            AlbumThumbnail(art: "thumb_rp/\(replay.thumb)", locked: !unlocked.contains(replay.label),
+                           label: "Scene \(index + 1)", scale: scale) {
+                close()
+                engine.startReplay(replay.label)
             }
         }
     }
 }
 
-private struct ThumbnailButton: View {
-    let art: String
-    let locked: Bool
-    let caption: String?
-    let action: () -> Void
-    @Environment(\.uiScale) private var scale
+/// The layout the gallery and scene replay share (ES.CGMODE.BTDEF, ES.RPMODE.BTDEF):
+/// six character buttons down the left over the chosen character's portrait, her
+/// entries six to a page on the right, page arrows, and the seen / total counter.
+private struct CharacterAlbum<Item: View>: View {
+    let room: Panel
+    let open: (Panel) -> Void
+    let close: () -> Void
+    let counts: (seen: Int, total: Int)
+    /// Each entry's character tab, in the original's order.
+    let items: [Int]
+    @ViewBuilder let item: (Int, CGFloat) -> Item
+
+    static var characters: [String] { ["Nemu", "Kanae", "Rinne", "Rika", "Natsuki", "Misc."] }
+    @State private var group = 1
+    @State private var page = 0
 
     var body: some View {
-        Button(action: action) {
-            ZStack(alignment: .bottomTrailing) {
-                if !locked, let image = ArtLibrary.shared.image(art) {
-                    Image(uiImage: image).resizable().aspectRatio(4 / 3, contentMode: .fill)
-                } else {
-                    Color.black.opacity(0.35)
-                        .overlay {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 26 * scale))
-                                .foregroundStyle(.tertiary)
-                        }
+        let entries = items.indices.filter { items[$0] == group }
+        let pages = max(1, (entries.count + 5) / 6)
+        let art = room == .gallery ? "cgmode" : "rpmode"
+        BonusScreen(backdrop: "sys/extra/\(art)/back", current: room, back: "sys/extra/\(art)/btn_back_bt3",
+                    backFrames: 3, underlay: String(format: "sys/extra/cgmode/tip_c%02d", group),
+                    open: open, close: close) { scale in
+            ForEach(1...6, id: \.self) { tab in
+                // x 41, rows 102 apart from y 111.
+                StripButton(art: String(format: "sys/extra/cgmode/btn_c%02d_bt3", tab), frames: 3,
+                            label: Self.characters[tab - 1], selected: tab == group, scale: scale, sound: SystemSound.tab) {
+                    group = tab
+                    page = 0
                 }
-                if let caption {
-                    Text(caption)
-                        .font(.system(size: 15 * scale, weight: .semibold))
-                        .padding(.horizontal, 8 * scale)
-                        .padding(.vertical, 3 * scale)
-                        .background(.black.opacity(0.55), in: .capsule)
-                        .padding(8 * scale)
+                .offset(x: 41 * scale, y: (111 + 102 * CGFloat(tab - 1)) * scale)
+            }
+            // Two columns of three, 241 × 180 apart from (518, 146); thumbnails inset 2.
+            ForEach(Array(entries.dropFirst(page * 6).prefix(6).enumerated()), id: \.element) { slot, index in
+                item(index, scale)
+                    .offset(x: (518 + 241 * CGFloat(slot % 2)) * scale, y: (146 + 180 * CGFloat(slot / 2)) * scale)
+            }
+            ArtButton(base: "sys/extra/\(art)/btn_prev", label: "Previous Page", enabled: page > 0, scale: scale) {
+                page -= 1
+            }
+            .offset(x: 843 * scale, y: 105 * scale)
+            ArtButton(base: "sys/extra/\(art)/btn_next", label: "Next Page", enabled: page + 1 < pages, scale: scale) {
+                page += 1
+            }
+            .offset(x: 945 * scale, y: 105 * scale)
+            ArtNumber(art: "sys/extra/\(art)/num_l", value: page + 1, scale: scale)
+                .offset(x: 892 * scale, y: 97 * scale)
+            // Seen before the slash, total after it.
+            ArtNumber(art: "sys/extra/\(art)/num_m", value: counts.seen, scale: scale)
+                .frame(width: 104 * scale, alignment: .trailing)
+                .offset(x: 536 * scale, y: 88 * scale)
+            ArtNumber(art: "sys/extra/\(art)/num_m", value: counts.total, scale: scale)
+                .offset(x: 673 * scale, y: 88 * scale)
+                .accessibilityLabel("\(counts.seen) of \(counts.total) unlocked")
+        }
+        .onAppear {
+            if let place = AlbumPlace.remembered[room] { (group, page) = place }
+        }
+        .onChange(of: group) { AlbumPlace.remembered[room] = (group, page) }
+        .onChange(of: page) { AlbumPlace.remembered[room] = (group, page) }
+    }
+}
+
+/// The tab and page last shown in each album, kept while the app runs so a finished
+/// replay returns to the same place.
+@MainActor private enum AlbumPlace {
+    static var remembered: [Panel: (group: Int, page: Int)] = [:]
+}
+
+/// A gallery or replay entry: the original's plate (its locked look), with the
+/// thumbnail over it once unlocked.
+private struct AlbumThumbnail: View {
+    let art: String
+    let locked: Bool
+    let label: String
+    let scale: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        let library = ArtLibrary.shared
+        Button(action: action) {
+            ZStack(alignment: .topLeading) {
+                if let plate = library.image("sys/extra/cgmode/btn_plate_back_off") {
+                    Image(uiImage: plate).resizable()
+                        .frame(width: plate.size.width * scale, height: plate.size.height * scale)
+                }
+                if !locked, let image = library.image(art) {
+                    Image(uiImage: image).resizable()
+                        .frame(width: 215 * scale, height: 161 * scale)
+                        .offset(x: 2 * scale, y: 2 * scale)
                 }
             }
-            .aspectRatio(4 / 3, contentMode: .fit)
-            .clipShape(.rect(cornerRadius: 14 * scale))
-            .contentShape(.hoverEffect, .rect(cornerRadius: 14 * scale))
+            .contentShape(.hoverEffect, .rect(cornerRadius: 4 * scale))
             .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
         .disabled(locked)
-        .accessibilityLabel(locked ? "Locked" : "Open")
+        .accessibilityLabel(locked ? "Locked" : label)
     }
 }
 
-/// A gallery set's pictures, full window. Tap for the next; past the last closes.
+/// A number drawn with the original's digit art ("<art>/num_0" ... "num_9").
+private struct ArtNumber: View {
+    let art: String
+    let value: Int
+    let scale: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(String(value).enumerated()), id: \.offset) { _, digit in
+                if let image = ArtLibrary.shared.image("\(art)/num_\(digit)") {
+                    Image(uiImage: image).resizable()
+                        .frame(width: image.size.width * scale, height: image.size.height * scale)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value)")
+    }
+}
+
+/// A gallery set's pictures, full window, with Previous and Next below and the
+/// picture's place in the set between them. Tap for the next; past the last closes.
+/// With spatial scenes on, the whole set is queued for generation from the picture
+/// shown outward, so the next ones are ready by the time they come up.
 struct PictureViewer: View {
     let pictures: [String]
     let close: () -> Void
     @State private var index = 0
+    @State private var spatialShowing = false
     @Environment(\.uiScale) private var scale
 
     var body: some View {
         ZStack {
-            Color.black
+            // Cleared while a spatial scene shows: it renders behind the window and
+            // an opaque fill would hide it.
+            Color.black.opacity(spatialShowing ? 0 : 1)
             if index < pictures.count, let image = ArtLibrary.shared.image(pictures[index]) {
                 if SpatialSceneLibrary.isEligible(pictures[index]) {
-                    // Screen-shaped event CGs open as spatial scenes.
-                    SpatialPicture(name: pictures[index])
-                        .id(index)
-                        .transition(.opacity)
+                    // Screen-shaped event CGs open as spatial scenes. Pictures change at
+                    // once, with no fade between them.
+                    SpatialPicture(name: pictures[index], fades: false)
                 } else {
                     // Tall and wide pictures scroll, as in the original's viewer.
                     ScrollView(image.size.width / image.size.height > 1.4 ? .horizontal : .vertical) {
@@ -170,40 +259,92 @@ struct PictureViewer: View {
                     }
                     .scrollIndicators(.hidden)
                     .id(index)
-                    .transition(.opacity)
                 }
             }
         }
         .clipShape(.rect(cornerRadius: StageView.cornerRadius))
         .contentShape(.rect)
+        .onPreferenceChange(SpatialShowingKey.self) { spatialShowing = !$0.isEmpty }
         .onTapGesture {
             if index + 1 < pictures.count { index += 1 } else { close() }
         }
         .overlay(alignment: .topTrailing) {
-            HStack(spacing: 12 * scale) {
-                Text("\(index + 1) / \(pictures.count)")
-                    .font(.system(size: 18 * scale, weight: .semibold))
-                    .monospacedDigit()
-                Button(action: close) {
-                    Image(systemName: "xmark").font(.system(size: 18 * scale, weight: .semibold))
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Close")
+            Button {
+                SystemSound.play(SystemSound.click)
+                close()
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 18 * scale, weight: .semibold))
+                    .frame(width: 52 * scale, height: 52 * scale)
             }
+            .buttonStyle(.borderless)
+            .buttonBorderShape(.circle)
+            .roomGlass(in: .circle)
+            .padding(26 * scale)
+            .accessibilityLabel("Close")
+        }
+        .overlay(alignment: .bottom) { navigation }
+        .onChange(of: index, initial: true) { _, index in queueSet(from: index) }
+        .onDisappear {
+            // Stop generating the rest of the set once it is closed.
+            SpatialSceneLibrary.shared.lookahead([])
+        }
+        .accessibilityAction(named: "Next") { step(1) }
+        .accessibilityAction(named: "Previous") { step(-1) }
+    }
+
+    /// Previous, the picture's place in the set, Next.
+    private var navigation: some View {
+        HStack(spacing: 22 * scale) {
+            navigationButton("Previous", symbol: "chevron.left", enabled: index > 0) { step(-1) }
+            Text("\(index + 1) / \(pictures.count)")
+                .font(.game(22 * scale, weight: .semibold))
+                .monospacedDigit()
+                .frame(minWidth: 90 * scale)
+                .accessibilityLabel("Picture \(index + 1) of \(pictures.count)")
+            navigationButton("Next", symbol: "chevron.right", enabled: index + 1 < pictures.count, trailingIcon: true) { step(1) }
+        }
+        .padding(.horizontal, 14 * scale)
+        .padding(.vertical, 10 * scale)
+        .roomGlass(in: .capsule)
+        .padding(.bottom, 30 * scale)
+    }
+
+    private func navigationButton(_ title: String, symbol: String, enabled: Bool, trailingIcon: Bool = false,
+                                  action: @escaping () -> Void) -> some View {
+        Button {
+            SystemSound.play(SystemSound.click)
+            action()
+        } label: {
+            HStack(spacing: 8 * scale) {
+                if !trailingIcon { Image(systemName: symbol) }
+                Text(title)
+                if trailingIcon { Image(systemName: symbol) }
+            }
+            .font(.game(21 * scale, weight: .medium))
             .padding(.horizontal, 18 * scale)
             .padding(.vertical, 10 * scale)
-            .glassBackgroundEffect(in: .capsule)
-            .padding(26 * scale)
+            .contentShape(.hoverEffect, .capsule)
+            .hoverEffect(.highlight)
         }
-        .animation(.easeInOut(duration: 0.3), value: index)
-        .onChange(of: index, initial: true) { _, index in
-            // Have the next picture's scene ready by the time it is shown.
-            let next = pictures.dropFirst(index + 1).prefix(1).filter(SpatialSceneLibrary.isEligible)
-            SpatialSceneLibrary.shared.prefetch(next.compactMap(StoryLibrary.shared.assetURL))
-        }
-        .accessibilityAction(named: "Next") {
-            if index + 1 < pictures.count { index += 1 }
-        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        // Greyed out at the first and last picture of the set.
+        .opacity(enabled ? 1 : 0.3)
+    }
+
+    private func step(_ direction: Int) {
+        index = min(max(index + direction, 0), pictures.count - 1)
+    }
+
+    /// The set's spatial-eligible pictures, nearest first: the ones after this one in
+    /// order, then the ones before it going back. Replaces any earlier queue.
+    private func queueSet(from index: Int) {
+        guard Settings.shared.spatialScenes else { return }
+        let after = pictures.indices.filter { $0 > index }
+        let before = pictures.indices.filter { $0 < index }.reversed()
+        let order = [index] + after + before
+        let sources = order.map { pictures[$0] }.filter(SpatialSceneLibrary.isEligible).compactMap { SpatialSource($0) }
+        SpatialSceneLibrary.shared.lookahead(sources)
     }
 
     /// Screen-shaped pictures fit; panoramas and tall pictures fill one axis and scroll.
@@ -215,17 +356,22 @@ struct PictureViewer: View {
 
 /// A button made of the original's art files: "<base>_off", highlighted with
 /// "<base>_over" while looked at, "<base>_on" while pressed, "<base>_na" when unavailable.
+/// Pressing plays the original's click sound.
 struct ArtButton: View {
     let base: String
     let label: String
     var enabled = true
     let scale: CGFloat
+    var sound: String? = SystemSound.click
     let action: () -> Void
 
     var body: some View {
         let library = ArtLibrary.shared
         if let image = library.image("\(base)_\(enabled ? "off" : "na")") ?? library.image("\(base)_off") {
-            Button(action: action) {
+            Button {
+                SystemSound.play(sound)
+                action()
+            } label: {
                 Image(uiImage: image).resizable()
                     .frame(width: image.size.width * scale, height: image.size.height * scale)
                     .opacity(enabled || library.image("\(base)_na") != nil ? 1 : 0.4)
@@ -237,8 +383,12 @@ struct ArtButton: View {
                     }
                     // A taller target than thin text art, for eyes and fingers.
                     .padding(.vertical, 10 * scale)
-                    .contentShape(.rect)
+                    .contentShape([.interaction, .hoverEffect], .rect)
                     .padding(.vertical, -10 * scale)
+                    // Looking anywhere at the button shows the "_over" art: without a
+                    // group, that art's effect waits for a look at the art itself, which
+                    // visionOS never reports for a view that is not the button.
+                    .hoverEffectGroup()
             }
             .buttonStyle(PressedArtStyle(pressed: library.image("\(base)_on")))
             .disabled(!enabled)
@@ -256,12 +406,16 @@ struct StripButton: View {
     var selected = false
     var enabled = true
     let scale: CGFloat
+    var sound: String? = SystemSound.click
     let action: () -> Void
 
     var body: some View {
         let library = ArtLibrary.shared
         if let rest = library.frame(art, selected ? 2 : 0, of: frames) {
-            Button(action: action) {
+            Button {
+                SystemSound.play(sound)
+                action()
+            } label: {
                 Image(uiImage: rest).resizable()
                     .frame(width: rest.size.width * scale, height: rest.size.height * scale)
                     .opacity(enabled ? 1 : 0.35)
@@ -271,7 +425,8 @@ struct StripButton: View {
                                 .hoverEffect { effect, isActive, _ in effect.opacity(isActive ? 1 : 0) }
                         }
                     }
-                    .contentShape(.rect)
+                    .contentShape([.interaction, .hoverEffect], .rect)
+                    .hoverEffectGroup()
             }
             .buttonStyle(PressedArtStyle(pressed: library.frame(art, 2, of: frames)))
             .disabled(!enabled)
@@ -302,6 +457,8 @@ private struct BonusScreen<Content: View>: View {
     let current: Panel
     let back: String
     let backFrames: Int
+    /// Art drawn over the backdrop and under the buttons (the album's portrait).
+    var underlay: String?
     let open: (Panel) -> Void
     let close: () -> Void
     @ViewBuilder let content: (CGFloat) -> Content
@@ -319,9 +476,14 @@ private struct BonusScreen<Content: View>: View {
                     Image(uiImage: image).resizable()
                         .frame(width: proxy.size.width, height: proxy.size.height)
                 }
+                if let underlay, let image = ArtLibrary.shared.image(underlay) {
+                    Image(uiImage: image).resizable()
+                        .frame(width: image.size.width * scale, height: image.size.height * scale)
+                        .allowsHitTesting(false)
+                }
                 ForEach(Self.tabs, id: \.art) { tab in
                     StripButton(art: "sys/extra/btn_tab_\(tab.art)_bt3", frames: 3, label: tab.label,
-                                selected: tab.panel == current, scale: scale) {
+                                selected: tab.panel == current, scale: scale, sound: SystemSound.tab) {
                         if tab.panel != current { open(tab.panel) }
                     }
                     .offset(x: tab.x * scale, y: 34 * scale)
@@ -348,23 +510,23 @@ struct MusicRoom: View {
     let close: () -> Void
     @State private var playing: String?
     private let tracks = StoryLibrary.shared.index.music
-    private let progress = Progress.shared
 
     var body: some View {
         BonusScreen(backdrop: "sys/extra/bgmmode/back", current: .music, back: "sys/extra/bgmmode/btn_back_bt3",
                     backFrames: 3, open: open, close: close) { scale in
             ForEach(Array(tracks.enumerated()), id: \.element) { index, track in
-                let heard = progress.tracks.contains(track)
+                // Every track is open, as the original's ES.BGMMODE.INIT unlocks them all.
                 // Tracks 1–10 at x 51, 11–20 at x 521; rows 46 apart from y 92 (ES.BGMMODE.BTDEF).
                 StripButton(art: String(format: "sys/extra/bgmmode/btn_bgm%02d_bt4", index + 1), frames: 4,
-                            label: heard ? "Track \(index + 1)" : "Track \(index + 1), locked",
-                            selected: playing == track, enabled: heard, scale: scale) {
+                            label: "Track \(index + 1)", selected: playing == track, scale: scale) {
                     toggle(track)
                 }
                 .offset(x: (index < 10 ? 51 : 521) * scale, y: (92 + 46 * CGFloat(index % 10) - (index == 0 ? 1 : 0)) * scale)
             }
         }
-        .onDisappear { engine.audio.stop(channel: 1, fadeMs: 500) }
+        .onDisappear {
+            if playing != nil { engine.audio.stop(channel: 1, fadeMs: 500) }
+        }
     }
 
     private func toggle(_ track: String) {

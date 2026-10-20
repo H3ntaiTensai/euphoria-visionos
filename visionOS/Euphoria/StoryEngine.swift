@@ -108,7 +108,13 @@ final class StoryEngine {
     /// Message text size set by the script (es.TextSizeChange); nil is the original's 22.
     var textSize: Int?
     @ObservationIgnored private var skipWait = false
+    /// When each named sprite event queue (es.SP.SET.SET's "E01", "E02") is free again.
+    @ObservationIgnored var eventQueues: [String: TimeInterval] = [:]
+    /// Pauses queued on sprites with nothing to draw, which es.SP.WA.SET still waits for.
+    @ObservationIgnored var spriteHolds: [String: TimeInterval] = [:]
     @ObservationIgnored private var carriedText = ""
+    /// Where the line being carried began: its first piece.
+    @ObservationIgnored private var carriedStart = 0
     @ObservationIgnored private var carriedSpeaker: (String?, String?)?
     @ObservationIgnored private var reported: Set<String> = []
     /// While replaying an imported save up to its line: the target and the save's variables.
@@ -146,9 +152,9 @@ final class StoryEngine {
             audio.restore(data.music)
         }
         // The saved scene's picture first, then what follows it.
-        if let background = stage.sprites["BG"]?.image, SpatialSceneLibrary.isEligible(background),
-           let url = library.assetURL(background) {
-            SpatialSceneLibrary.shared.prefetch([url])
+        if let sprite = stage.sprites["BG"], let background = sprite.image, SpatialSceneLibrary.isEligible(background),
+           let source = SpatialSource(background, tint: sprite.tint) {
+            SpatialSceneLibrary.shared.prefetch([source])
         }
         prefetchScenes()
         mode = .story
@@ -191,6 +197,11 @@ final class StoryEngine {
         choices = nil
         pictureChoices = nil
         carriedText = ""
+        carriedSpeaker = nil
+        // Loading a save in the middle of a replay leaves the replay.
+        replay = nil
+        eventQueues = [:]
+        spriteHolds = [:]
         savePoint = nil
         textSize = nil
         skipping = false
@@ -243,8 +254,11 @@ final class StoryEngine {
             let text = op.t ?? op.e.map { vars.evaluate($0).text } ?? ""
             guard op.w ?? true else {
                 // A line split around an inserted name ("Keisuke: “" + $1137(2000) + "!!”"):
-                // the speaker is on the first piece.
-                if carriedText.isEmpty, op.n != nil { carriedSpeaker = (op.n, op.c) }
+                // the speaker is on the first piece, and a save resumes there.
+                if carriedText.isEmpty {
+                    carriedStart = here
+                    if op.n != nil { carriedSpeaker = (op.n, op.c) }
+                }
                 carriedText += text
                 return
             }
@@ -256,12 +270,16 @@ final class StoryEngine {
             }
             let speaker = op.n != nil ? (op.n, op.c) : carriedSpeaker ?? (nil, nil)
             let shown = Line(name: speaker.0, who: speaker.1, text: carriedText + text, voice: lastVoice)
+            let start = carriedText.isEmpty ? here : carriedStart
             carriedText = ""
             carriedSpeaker = nil
             lastVoice = nil
+            // "Only skip already-read text" (the original's option, off by default).
+            let unread = ReadLog.shared.markRead(script: script, ip: start)
+            if skipping, unread, settings.skipReadOnly, !replaying { skipping = false }
             line = shown
             lineSerial += 1
-            markSavePoint(at: here)
+            markSavePoint(at: start)
             history.append(shown)
             #if DEBUG
             if UserDefaults.standard.bool(forKey: "traceLines") { debugLog("LINE \(library.index.scripts[String(script)] ?? "?") \(shown.name ?? "-"): \(shown.text.prefix(60))") }
@@ -363,6 +381,8 @@ final class StoryEngine {
         vars.set(Variables.saturation, [], saturation)
         vars.set(Variables.brightness, [], brightness)
         stage = stage.settled
+        eventQueues = [:]
+        spriteHolds = [:]
         audio.restore(catchUpMusic)
         skipping = false
     }
@@ -402,6 +422,8 @@ final class StoryEngine {
         }
         if skipWait {
             stage = stage.settled
+            eventQueues = [:]
+            spriteHolds = [:]
             skipWait = false
         }
     }
@@ -414,6 +436,9 @@ final class StoryEngine {
     func advance() {
         if let waiter = clickWaiter {
             clickWaiter = nil
+            // Cut the line's voice the moment the reader moves on, before the story
+            // runs ahead to the next one.
+            audio.stopVoices()
             waiter.resume()
         } else if choices == nil && pictureChoices == nil {
             skipWait = true
@@ -421,8 +446,9 @@ final class StoryEngine {
     }
 
     /// Plays a movie over everything and waits until it ends or the reader skips it.
+    /// Skip mode doesn't pass over movies, as in the original: a tap ends one.
     func playMovie(_ url: URL) async {
-        guard !skipping, !catchingUp, !Task.isCancelled else { return }
+        guard !catchingUp, !Task.isCancelled else { return }
         await withCheckedContinuation { continuation in
             movieWaiter = continuation
             movie = url
@@ -452,7 +478,9 @@ final class StoryEngine {
             SpatialSceneLibrary.shared.lookahead([])
             return
         }
-        var urls: [URL] = []
+        // Upcoming pictures, under the tint in force now (a flashback's sepia carries on).
+        var urls: [SpatialSource] = []
+        let tint = vars.tint
         var cursor = (script: script, ip: ip)
         var strings: [String: String] = [:]
         var visited: Set<Int> = []
@@ -464,11 +492,22 @@ final class StoryEngine {
             budget -= 1
             switch op.op {
             case "call":
-                guard let name = op.m, name.hasPrefix("MAC.BG") || name.hasPrefix("MAC.EV"),
-                      case .string(let picture)? = op.a?.first ?? nil,
-                      SpatialSceneLibrary.isEligible(picture), let url = library.assetURL(picture),
-                      !urls.contains(url) else { continue }
-                urls.append(url)
+                // MAC.BG / MAC.EV name the picture first; the sprite builder's es.SP.CG.SET
+                // (how many CG variations are swapped in) names it second.
+                guard let name = op.m else { continue }
+                let argument = name.hasPrefix("MAC.BG") || name.hasPrefix("MAC.EV") ? 0 : name == "es.SP.CG.SET" ? 1 : nil
+                guard let argument, let values = op.a, values.count > argument,
+                      case .string(let named)? = values[argument] else { continue }
+                // The variant the content options will show (MAC.EV's ninth argument picks the table).
+                func number(_ index: Int) -> Int? {
+                    guard index < values.count, case .int(let value)? = values[index] else { return nil }
+                    return value
+                }
+                let picture = name == "MAC.EV" ? cutinVariant(named, type: 2, mode: number(8) ?? 0, unlock: false)
+                    : name == "es.SP.CG.SET" ? cutinVariant(named, type: number(0) ?? 0, unlock: false) : named
+                guard SpatialSceneLibrary.isEligible(picture), let source = SpatialSource(picture, tint: tint),
+                      !urls.contains(source) else { continue }
+                urls.append(source)
             case "let":
                 if case .variable(let name, _)? = op.v, case .string(let value)? = op.e { strings[name] = value }
             case "go":

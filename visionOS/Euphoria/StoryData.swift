@@ -89,12 +89,18 @@ final class StoryLibrary: @unchecked Sendable {
         let music: [String]
         /// Staff comment labels, STAFF_01 ... STAFF_17.
         let staff: [String]
+        /// Picture variants behind the content options ("gore", "feces", "orgasm"), lowercase.
+        /// Gore lists [shown, without gore]; the others [both on, gore only, option only, neither].
+        /// Absent from story data converted before they were added.
+        let cutins: [String: [[String]]]?
     }
 
     /// A CG gallery entry: a thumbnail and its pictures, in the original's order.
     struct GallerySet: Decodable, Identifiable {
         let thumb: String
         let pictures: [String]
+        /// The character tab it is listed under, 1–6.
+        let group: Int
         var id: String { thumb }
     }
 
@@ -102,6 +108,8 @@ final class StoryLibrary: @unchecked Sendable {
     struct Replay: Decodable, Identifiable {
         let thumb: String
         let label: String
+        /// The character tab it is listed under, 1–6.
+        let group: Int
         var id: String { label }
     }
 

@@ -5,7 +5,6 @@ struct PanelHost: View {
     let panel: Panel
     let engine: StoryEngine
     let close: () -> Void
-    @State private var viewing: [String]?
     @Environment(\.uiScale) private var scale
 
     var body: some View {
@@ -17,7 +16,7 @@ struct PanelHost: View {
             VStack(alignment: .leading, spacing: 18 * scale) {
                 HStack {
                     Text(title)
-                        .font(.system(size: 38 * scale, weight: .semibold, design: .serif))
+                        .font(.game(38 * scale, weight: .semibold))
                     Spacer()
                     Button(action: close) {
                         Image(systemName: "xmark")
@@ -32,31 +31,15 @@ struct PanelHost: View {
                 case .save: SavePanel(engine: engine, saving: true, close: close)
                 case .load: SavePanel(engine: engine, saving: false, close: close)
                 case .settings: SettingsPanel(engine: engine)
-                case .gallery: GalleryPanel(viewing: $viewing)
-                case .replays: ReplayPanel(engine: engine, close: close)
-                case .music, .staff: EmptyView()  // full-window screens, shown by GameView
+                case .gallery, .replays, .music, .staff: EmptyView()  // full-window screens, shown by GameView
                 }
             }
             .padding(36 * scale)
             .frame(width: 1180 * scale, height: 880 * scale, alignment: .topLeading)
-            .glassBackgroundEffect(in: .rect(cornerRadius: 40 * scale))
+            .roomGlass(in: .rect(cornerRadius: 40 * scale))
             .contentShape(.rect(cornerRadius: 40 * scale))
             .onTapGesture {}
-            if let viewing {
-                PictureViewer(pictures: viewing) { self.viewing = nil }
-                    .transition(.opacity)
-            }
         }
-        .animation(.easeInOut(duration: 0.25), value: viewing)
-        #if DEBUG
-        .task {
-            // `-viewGallerySet 0`: open a gallery set's pictures.
-            guard panel == .gallery, let value = UserDefaults.standard.string(forKey: "viewGallerySet"),
-                  let index = Int(value) else { return }
-            let set = StoryLibrary.shared.index.gallery[index]
-            viewing = set.pictures.filter(Progress.shared.seenCG.contains)
-        }
-        #endif
     }
 
     private var title: String {
@@ -86,12 +69,12 @@ private struct HistoryPanel: View {
                             VStack(alignment: .leading, spacing: 4 * scale) {
                                 if let name = line.name {
                                     Text(name)
-                                        .font(.system(size: 24 * scale, weight: .semibold, design: .serif))
-                                        .foregroundStyle(CharacterColors.color(for: line))
+                                        .font(.game(24 * scale, weight: .semibold))
+                                        .foregroundStyle(CharacterColors.ink(for: line))
                                 }
                                 Text(line.text)
-                                    .font(.system(size: 25 * scale, design: .serif))
-                                    .foregroundStyle(line.name == nil ? .secondary : .primary)
+                                    .font(.game(25 * scale))
+                                    .foregroundStyle(line.name == nil ? RoomGlass.ink.opacity(0.72) : RoomGlass.ink)
                             }
                             Spacer(minLength: 0)
                             if let voice = line.voice {
@@ -160,14 +143,14 @@ private struct SlotCard: View {
                 }
                 .aspectRatio(4 / 3, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 14 * scale))
-                Text(label).font(.system(size: 20 * scale, weight: .semibold))
+                Text(label).font(.game(20 * scale, weight: .semibold))
                 Text(save?.line?.text ?? "Empty")
-                    .font(.system(size: 17 * scale, design: .serif))
+                    .font(.game(17 * scale))
                     .foregroundStyle(.secondary)
                     .lineLimit(2, reservesSpace: true)
             }
             .padding(14 * scale)
-            .glassBackgroundEffect(in: .rect(cornerRadius: 22 * scale))
+            .background(.black.opacity(0.05), in: .rect(cornerRadius: 22 * scale))
             .contentShape(.hoverEffect, .rect(cornerRadius: 22 * scale))
             .hoverEffect(.highlight)
         }
@@ -195,6 +178,8 @@ private struct SettingsPanel: View {
                 slider("Text Speed", value: $settings.textSpeed, range: 0...120, label: settings.textSpeed == 0 ? "Instant" : "\(Int(settings.textSpeed)) cps")
                 slider("Auto Delay", value: $settings.autoDelay, range: 0.3...5, label: String(format: "%.1f s", settings.autoDelay))
                 slider("Text Size", value: $settings.textScale, range: 0.8...1.4, label: "\(Int(settings.textScale * 100))%")
+                Toggle("Only Skip Already-Read Text", isOn: $settings.skipReadOnly)
+                Toggle("Keep Skipping After Choices", isOn: $settings.keepSkippingAfterChoices)
                 section("Sound")
                 slider("Music", value: $settings.musicVolume, range: 0...1, label: "\(Int(settings.musicVolume * 100))%")
                 slider("Effects", value: $settings.effectsVolume, range: 0...1, label: "\(Int(settings.effectsVolume * 100))%")
@@ -207,13 +192,31 @@ private struct SettingsPanel: View {
                     Text(SpatialSceneLibrary.shared.isSupported
                          ? "Backgrounds and event CGs gain depth behind the window. Each takes a few seconds to prepare."
                          : "Not available on this device; pictures stay flat.")
-                        .font(.system(size: 18 * scale))
+                        .font(.game(18 * scale))
                         .foregroundStyle(.secondary)
                 }
                 slider("Character Depth", value: $settings.characterDepth, range: 0...1, label: "\(Int(settings.characterDepth * 100))%")
+                section("Content")
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Toggle("Gory CG Variants", isOn: $settings.goreVariants)
+                    Toggle("Waste Matter CG Variants", isOn: $settings.fecesVariants)
+                    Toggle("Orgasm Expression Variants", isOn: $settings.orgasmVariants)
+                    Text("The original's content options. Turned off, scenes show the milder versions of these pictures from the next one on.")
+                        .font(.game(18 * scale))
+                        .foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4 * scale) {
+                    Toggle("Classic Bonus Menu", isOn: $settings.classicBonus)
+                    Text("Shows the gallery, scene replay, music and staff comments with the original PC layout.")
+                        .font(.game(18 * scale))
+                        .foregroundStyle(.secondary)
+                }
             }
-            .font(.system(size: 24 * scale))
+            .font(.game(24 * scale))
             .padding(.trailing, 20 * scale)
+            // The panel's ink would draw switches black when on, and sliders too heavy.
+            .toggleStyle(SwitchToggleStyle(tint: .green))
+            .tint(Color(white: 0.42))
         }
         .onChange(of: settings.musicVolume) { engine.audio.refreshVolumes() }
         .onChange(of: settings.effectsVolume) { engine.audio.refreshVolumes() }
@@ -222,7 +225,7 @@ private struct SettingsPanel: View {
     }
 
     private func section(_ title: String) -> some View {
-        Text(title).font(.system(size: 28 * scale, weight: .semibold, design: .serif)).padding(.top, 8 * scale)
+        Text(title).font(.game(28 * scale, weight: .semibold)).padding(.top, 8 * scale)
     }
 
     private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, label: String) -> some View {

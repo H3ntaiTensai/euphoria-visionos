@@ -11,17 +11,32 @@ struct GameView: View {
     @State private var panel: Panel?
     @State private var textHidden = false
 
+    private var showsBonusRoom: Bool { panel?.isBonus == true && !Settings.shared.classicBonus }
+
     var body: some View {
         GeometryReader { proxy in
             let scale = proxy.size.width / 1440
             ZStack {
                 switch engine.mode {
                 case .title:
+                    // Hidden under the bonus screens: the new one is glass over the room, and
+                    // the gallery's spatial scenes show only through a clear window.
                     TitleView(engine: engine, panel: $panel)
+                        .opacity(panel?.isBonus == true ? 0 : 1)
                 case .story:
                     StoryView(engine: engine, textHidden: $textHidden)
                 }
                 switch panel {
+                case let panel? where showsBonusRoom:
+                    // One view for every section, so music keeps playing between them.
+                    BonusRoom(engine: engine, section: panel, open: { self.panel = $0 }) { self.panel = nil }
+                        .transition(.opacity)
+                case .gallery:
+                    GalleryRoom(open: { panel = $0 }) { panel = nil }
+                        .transition(.opacity)
+                case .replays:
+                    ReplayRoom(engine: engine, open: { panel = $0 }) { panel = nil }
+                        .transition(.opacity)
                 case .music:
                     MusicRoom(engine: engine, open: { panel = $0 }) { panel = nil }
                         .transition(.opacity)
@@ -46,6 +61,8 @@ struct GameView: View {
             }
             .environment(\.uiScale, scale)
             .environment(\.stageFlattened, panel != nil)
+            // Noto Sans JP for any text that doesn't set its own size.
+            .font(.game(22 * scale))
         }
         .background(WindowAspectLock())
         .animation(.easeInOut(duration: 0.25), value: panel)
@@ -113,6 +130,29 @@ struct TitleView: View {
             .animation(.easeInOut(duration: 0.25), value: extras)
         }
         .clipShape(.rect(cornerRadius: StageView.cornerRadius))
+        .task {
+            // As ES.TITLE.LOOP: the opening theme, then the title call (system voice
+            // 0002) a moment later, in the original's default voice, Nemu's.
+            playTitleMusic()
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled, engine.mode == .title else { return }
+            // On the system voice channel, as ES.TITLE.VoicePlay.1: not a story line, so
+            // the title theme isn't lowered for it.
+            engine.audio.play(channel: 111, file: "nem_m01_0980", fadeMs: 0, volume: -1, loop: -1)
+        }
+        .task(id: panel == nil) {
+            // Back from the bonus screens, whose music room takes over the BGM channel.
+            // After a moment, so it follows the room stopping its track as it closes.
+            guard panel == nil else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            if !Task.isCancelled { playTitleMusic() }
+        }
+    }
+
+    /// The title theme on the BGM channel, unless it is already playing.
+    private func playTitleMusic() {
+        guard engine.mode == .title, engine.audio.looping[1]?.file != "op" else { return }
+        engine.audio.play(channel: 1, file: "op", fadeMs: 0, volume: -1, loop: -1)
     }
 
     private var buttons: [(art: String, action: (() -> Void)?)] {
@@ -120,7 +160,7 @@ struct TitleView: View {
             let staff = (1...StoryLibrary.shared.index.staff.count).contains(where: progress.staffUnlocked)
             return [("cgmode", { panel = .gallery }),
                     ("rpmode", { panel = .replays }),
-                    ("bgmmode", progress.tracks.isEmpty ? nil : { panel = .music }),
+                    ("bgmmode", { panel = .music }),
                     ("staffmode", staff ? { panel = .staff } : nil),
                     ("back", { extras = false })]
         }
@@ -264,12 +304,12 @@ private struct DialoguePanel: View {
         VStack(alignment: .leading, spacing: 10 * scale) {
             if let name = line.name {
                 Text(name)
-                    .font(.system(size: 30 * text, weight: .semibold, design: .serif))
+                    .font(.game(30 * text, weight: .semibold))
                     .foregroundStyle(CharacterColors.color(for: line))
             }
             // The unrevealed rest keeps its space, so the panel never resizes mid-line.
             Text("\(Text(line.text.prefix(revealed)))\(Text(line.text.dropFirst(revealed)).foregroundStyle(.clear))")
-                .font(.system(size: 30 * text, design: .serif))
+                .font(.game(30 * text))
                 .lineSpacing(7 * text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel(line.text)
@@ -299,6 +339,20 @@ enum CharacterColors {
         return name.contains("?") ? Color(white: 0.92) : color(for: line.who ?? name)
     }
 
+    /// The speaker's color for text on the light menus: the same hues, dark enough to read.
+    static func ink(for line: Line) -> Color {
+        guard let name = line.name, !name.contains("?") else { return RoomGlass.ink }
+        return switch line.who ?? name {
+        case "Nemu", "Young Nemu": Color(red: 0.20, green: 0.30, blue: 0.68)
+        case "Kanae": Color(red: 0.70, green: 0.32, blue: 0.16)
+        case "Rinne": Color(red: 0.45, green: 0.26, blue: 0.70)
+        case "Rika": Color(red: 0.70, green: 0.20, blue: 0.40)
+        case "Natsuki": Color(red: 0.12, green: 0.48, blue: 0.32)
+        case "Keisuke": Color(red: 0.22, green: 0.34, blue: 0.50)
+        default: RoomGlass.ink
+        }
+    }
+
     static func color(for who: String) -> Color {
         switch who {
         case "Nemu", "Young Nemu": Color(red: 0.72, green: 0.78, blue: 1.0)
@@ -322,7 +376,7 @@ private struct ChoiceList: View {
             ForEach(choices) { choice in
                 Button { choose(choice.index) } label: {
                     Text(choice.text)
-                        .font(.system(size: 28 * scale, weight: .medium, design: .serif))
+                        .font(.game(28 * scale, weight: .medium))
                         .padding(.horizontal, 40 * scale)
                         .padding(.vertical, 18 * scale)
                         .frame(minWidth: 520 * scale)
@@ -416,8 +470,9 @@ private struct ControlBar: View {
                 .help("Title")
         }
         .buttonStyle(.borderless)
+        .font(.game(19))
         .padding(12)
-        .glassBackgroundEffect()
+        .roomGlass(in: .capsule)
     }
 }
 

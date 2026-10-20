@@ -21,13 +21,26 @@ final class Settings {
     var spatialScenes: Bool { didSet { save() } }
     /// How far characters float in front of the background, 0 (flat) to 1.
     var characterDepth: Double { didSet { save() } }
+    /// Show the bonus screens with the original's PC layout instead of the visionOS one.
+    var classicBonus: Bool { didSet { save() } }
+    /// The original's content options: show the gory, waste matter and orgasm
+    /// expression variants of event CGs (on, as in the original).
+    var goreVariants: Bool { didSet { save() } }
+    var fecesVariants: Bool { didSet { save() } }
+    var orgasmVariants: Bool { didSet { save() } }
+    /// Skip stops at text not read before (the original's option, off by default).
+    var skipReadOnly: Bool { didSet { save() } }
+    /// Skip carries on after a choice is made (on in the original by default).
+    var keepSkippingAfterChoices: Bool { didSet { save() } }
 
     private let defaults = UserDefaults.standard
 
     private init() {
         defaults.register(defaults: ["textSpeed": 50.0, "autoDelay": 1.5, "textScale": 1.0, "musicVolume": 0.7,
                                      "effectsVolume": 0.9, "voiceVolume": 1.0, "muted": false, "transitions": true,
-                                     "spatialScenes": true, "characterDepth": 0.6])
+                                     "spatialScenes": true, "characterDepth": 0.6, "classicBonus": false,
+                                     "goreVariants": true, "fecesVariants": true, "orgasmVariants": true,
+                                     "skipReadOnly": false, "keepSkippingAfterChoices": true])
         textSpeed = defaults.double(forKey: "textSpeed")
         autoDelay = defaults.double(forKey: "autoDelay")
         textScale = defaults.double(forKey: "textScale")
@@ -38,6 +51,12 @@ final class Settings {
         transitions = defaults.bool(forKey: "transitions")
         spatialScenes = defaults.bool(forKey: "spatialScenes")
         characterDepth = defaults.double(forKey: "characterDepth")
+        classicBonus = defaults.bool(forKey: "classicBonus")
+        goreVariants = defaults.bool(forKey: "goreVariants")
+        fecesVariants = defaults.bool(forKey: "fecesVariants")
+        orgasmVariants = defaults.bool(forKey: "orgasmVariants")
+        skipReadOnly = defaults.bool(forKey: "skipReadOnly")
+        keepSkippingAfterChoices = defaults.bool(forKey: "keepSkippingAfterChoices")
     }
 
     private func save() {
@@ -51,6 +70,12 @@ final class Settings {
         defaults.set(transitions, forKey: "transitions")
         defaults.set(spatialScenes, forKey: "spatialScenes")
         defaults.set(characterDepth, forKey: "characterDepth")
+        defaults.set(classicBonus, forKey: "classicBonus")
+        defaults.set(goreVariants, forKey: "goreVariants")
+        defaults.set(fecesVariants, forKey: "fecesVariants")
+        defaults.set(orgasmVariants, forKey: "orgasmVariants")
+        defaults.set(skipReadOnly, forKey: "skipReadOnly")
+        defaults.set(keepSkippingAfterChoices, forKey: "keepSkippingAfterChoices")
     }
 }
 
@@ -81,6 +106,7 @@ final class Progress {
     struct Stored: Codable {
         var seenCG: Set<String> = []
         var replays: Set<String> = []
+        /// Tracks heard, from older versions; Music Replay now opens every track.
         var tracks: Set<String> = []
         var movies: Set<String> = []
         var endings: Set<Int> = []
@@ -107,15 +133,6 @@ final class Progress {
 
     var seenCG: Set<String> { stored.seenCG }
     var replays: Set<String> { stored.replays }
-    var tracks: Set<String> { stored.tracks }
-
-    /// A music room track ("m01", "rakuen_full") played in the story.
-    func heardTrack(_ file: String) {
-        let key = file.lowercased()
-        guard !stored.tracks.contains(key) else { return }
-        stored.tracks.insert(key)
-        save()
-    }
 
     /// Staff comment n (1-based) is open once the original sets @1134(8000 + n).
     func staffUnlocked(_ number: Int) -> Bool {
@@ -149,11 +166,48 @@ final class Progress {
 
     /// The original opens the extras menu once the game has been cleared (@1134(1000)).
     var extrasUnlocked: Bool {
-        GlobalStore.shared.values[Variables.key("@1134", [1000])]?.integer == 1 || !stored.replays.isEmpty
+        GlobalStore.shared.values[Variables.key("@1134", [1000])]?.integer == 1
     }
 
     private func save() {
         if let data = try? JSONEncoder().encode(stored) { try? data.write(to: url, options: .atomic) }
+    }
+}
+
+/// Lines the reader has seen, for "Only skip already-read text": story script → the
+/// instructions where its lines start. Documents/read.json, written a moment after changes.
+@MainActor
+final class ReadLog {
+    static let shared = ReadLog()
+    private var lines: [Int: Set<Int>]
+    private let url = URL.documentsDirectory.appending(path: "read.json")
+    private let queue = DispatchQueue(label: "read-log", qos: .utility)
+    private var writeScheduled = false
+
+    private init() {
+        lines = (try? JSONDecoder().decode([Int: Set<Int>].self, from: Data(contentsOf: url))) ?? [:]
+    }
+
+    /// Marks a line read. True when it had not been read before.
+    @discardableResult
+    func markRead(script: Int, ip: Int) -> Bool {
+        guard lines[script, default: []].insert(ip).inserted else { return false }
+        scheduleWrite()
+        return true
+    }
+
+    private func scheduleWrite() {
+        guard !writeScheduled else { return }
+        writeScheduled = true
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            writeScheduled = false
+            let snapshot = lines
+            let url = url
+            queue.async {
+                if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+            }
+        }
     }
 }
 

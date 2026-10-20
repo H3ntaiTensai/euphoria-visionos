@@ -228,6 +228,12 @@ def definitions(src, commands, scripts, wanted):
     return found
 
 
+# Picture variants (es.SP.CUTIN5/6/7.DEF) behind the original's content options:
+# gore: [shown, without gore]; feces and orgasm: four pictures, picked by gore and
+# that option ([both on, gore only, option only, neither]). Showing one unlocks all
+# of them in the CG gallery.
+CUTINS = {"gore": "es.SP.CUTIN5.DEF", "feces": "es.SP.CUTIN6.DEF", "orgasm": "es.SP.CUTIN7.DEF"}
+
 MOVIES = ["op", "fake", "normal_bad", "normal_good", "special_bad", "true_end"]
 
 
@@ -236,14 +242,21 @@ def extras(src, commands, scripts):
 
     Gallery: es.CGMODE.CG.SET adds a picture, THUMB.SET names the set's
     thumbnail, DEF.SET closes the set. Replays: THUMB.SET, LABEL.SET, DEF.SET.
+    Both lists set their character tab (1-6) in @5060 (gallery) or @5073 (replays).
     """
     gallery, replays, music = [], [], []
     pictures, thumb, label = [], None, None
+    groups = {5060: 0, 5073: 0}
     for index, path in scripts.items():
         ybn = os.path.join(src, f"yst{index:05d}.ybn")
         if "userdefine" not in path or not os.path.exists(ybn):  # userdefine and puserdefine
             continue
         for ins in yuris.Script(ybn, commands).instructions:
+            if ins["cmd"] == "LET" and len(ins["args"]) == 2 and ins["args"][0]["op"] == 0:
+                target, value = (a["raw"] for a in ins["args"])
+                variable = int.from_bytes(target[4:6], "little") if target[:1] == b"H" and len(target) == 6 else None
+                if variable in groups:
+                    groups[variable] = yuris.literal(value)
             if ins["cmd"] != "GOSUB":
                 continue
             values = [a for a in ins["args"] if a["type"] != 0]
@@ -254,12 +267,12 @@ def extras(src, commands, scripts):
             elif name in ("es.CGMODE.THUMB.SET", "es.RPMODE.THUMB.SET"):
                 thumb = arg.lower()
             elif name == "es.CGMODE.DEF.SET":
-                gallery.append({"thumb": thumb, "pictures": pictures})
+                gallery.append({"thumb": thumb, "pictures": pictures, "group": groups[5060]})
                 pictures, thumb = [], None
             elif name == "es.RPMODE.LABEL.SET":
                 label = arg
             elif name == "es.RPMODE.DEF.SET":
-                replays.append({"thumb": thumb, "label": label})
+                replays.append({"thumb": thumb, "label": label, "group": groups[5073]})
                 thumb, label = None, None
             elif name == "ES.BGMMODE.FILE.SET":
                 music.append(arg.lower())
@@ -288,7 +301,7 @@ def main():
             json.dump({"path": rel.replace("\\", "/"), "ops": ops}, f, ensure_ascii=False, separators=(",", ":"))
         kept[index] = rel
 
-    defs = definitions(src, commands, scripts, ["es.BGMDEF", "es.CHAR.NAME"])
+    defs = definitions(src, commands, scripts, ["es.BGMDEF", "es.CHAR.NAME"] + list(CUTINS.values()))
     gallery, replays, music = extras(src, commands, scripts)
     index = {
         "scripts": {str(k): v.replace("\\", "/") for k, v in kept.items()},
@@ -301,6 +314,7 @@ def main():
         "replays": replays,
         "music": music,
         "staff": sorted(l["name"] for l in labels if l["name"].startswith("STAFF_") and l["script"] in kept),
+        "cutins": {kind: [[name.lower() for name in a] for a in defs[macro]] for kind, macro in CUTINS.items()},
     }
     with open(os.path.join(story_dir, "index.json"), "w", encoding="utf-8") as f:
         json.dump(index, f, ensure_ascii=False, separators=(",", ":"))
