@@ -205,7 +205,11 @@ struct BonusRoom: View {
         }
         .fixedSize()
         .padding(10)
-        .roomGlass(in: .rect(cornerRadius: 32))
+        // Plain white over the glass instead of the room picture: still see-through.
+        .foregroundStyle(RoomGlass.ink)
+        .tint(RoomGlass.ink)
+        .background(.white.opacity(0.55), in: .rect(cornerRadius: 32))
+        .glassBackgroundEffect(in: .rect(cornerRadius: 32))
     }
 
     private static func label(_ tab: Panel) -> String {
