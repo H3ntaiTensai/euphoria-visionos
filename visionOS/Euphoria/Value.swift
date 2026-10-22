@@ -92,6 +92,17 @@ struct Variables: Codable, Sendable {
         values[Self.brightness] = .int(Tint.neutralColor)
     }
 
+    private enum CodingKeys: String, CodingKey { case values }
+
+    /// A save's variables over the framework's starting values: saves imported from the
+    /// PC game (tools/import_saves.py) lack them, and a missing camera tint reads as 0,
+    /// which draws every picture black.
+    init(from decoder: Decoder) throws {
+        self.init()
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        merge(try container.decode([String: Value].self, forKey: .values))
+    }
+
     /// The camera tint applied to pictures as they load (es.CM.SD.SET / es.CM.MD.SET).
     static let saturation = "@1085"
     static let brightness = "@1086"
