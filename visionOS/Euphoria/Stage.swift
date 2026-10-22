@@ -106,16 +106,24 @@ struct Sprite: Codable, Equatable, Identifiable, Sendable {
          holdUntil ?? 0].max() ?? 0
     }
 
-    /// A background or event CG shown full screen and still: the moments a
-    /// spatial scene can stand in for the flat picture.
-    func isStillBackground(at time: TimeInterval) -> Bool {
+    /// A background or event CG shown full screen, opaque and still: the moments a
+    /// spatial scene can stand in for the flat picture. Usually the background, but
+    /// scenes also lay whole event CGs over it on other layers (SP001, AVI_ONa,
+    /// OBUTSU_ONa), often beside a cross-section; those cover it entirely.
+    func isStillPicture(at time: TimeInterval) -> Bool {
         // A finished crossfade leaves `previous` set; once busyUntil has passed, the old
         // picture is no longer drawn. A camera tint is baked into the scene.
-        guard id == "BG", let image, blur == nil, sway == nil, quake == nil,
+        guard !Self.covers.contains(id), let image, blur == nil, sway == nil, quake == nil,
               busyUntil <= time else { return false }
+        // Drawn at its pixel size, so it covers the screen only when it is screen-sized.
         return alpha.to >= 256 && abs(x.to) < 0.5 && abs(y.to) < 0.5 && abs(z.to - Screen.baseDepth) < 0.5
             && SpatialSceneLibrary.isEligible(image)
+            && (ArtLibrary.shared.pixelSize(image)?.width ?? 0) >= Screen.size.width - 1
     }
+
+    /// Framework layers drawn over the scene (an event CG's overlay, the incoming
+    /// background, fades, flashes) that never become spatial scenes themselves.
+    private static let covers: Set<String> = ["EV_W", "BGF", "LNO_FD", "MAC_FLASH"]
 
     var settled: Sprite {
         var copy = self
@@ -136,7 +144,18 @@ struct Stage: Codable, Equatable, Sendable {
     var sprites: [String: Sprite] = [:]
     var nextOrder = 0
 
-    var ordered: [Sprite] { sprites.values.sorted { $0.order < $1.order } }
+    /// Back to front. The framework's fixed layers keep their places; the rest stack by
+    /// depth as the original's draw priority does (es.SP.DRAW: nearer, a smaller z, on
+    /// top), and in creation order at the same depth. A cross-section at z 199.99 thus
+    /// stays in front of the event CG laid over the background after it.
+    var ordered: [Sprite] {
+        sprites.values.sorted { a, b in
+            guard Self.fixedOrder(a.id) == nil, Self.fixedOrder(b.id) == nil, a.z.to != b.z.to else {
+                return a.order < b.order
+            }
+            return a.z.to > b.z.to
+        }
+    }
 
     var busyUntil: TimeInterval { sprites.values.map(\.busyUntil).max() ?? 0 }
 

@@ -95,6 +95,7 @@ extension StoryEngine {
             vars.set(Self.cutinMode, [94, 6], .int(args.int(9)))
             await showBackground(cutinVariant(args.string(1), type: 2), kind: "ev", z: args.double(2, -1), ms: args.int(3, -1),
                                  rule: args.string(4))
+            guard !Task.isCancelled else { return }
             if args.int(8) != 0 {
                 pending = PendingSprite(image: "ev/\(args.string(1))_w")
                 commit("EV_W")
@@ -120,6 +121,7 @@ extension StoryEngine {
             cover.alpha = Tween(from: 0, to: 256, start: now, duration: seconds(args.double(1)))
             stage.sprites["LNO_FD"] = cover
             await pause(until: cover.busyUntil)
+            guard !Task.isCancelled else { return }
             removeAll(keeping: [])
         case "MAC.FIN":
             guard var cover = stage.sprites["LNO_FD"] else { return }
@@ -128,6 +130,7 @@ extension StoryEngine {
             stage.sprites["LNO_FD"] = cover
             if args.int(4) == 1 {
                 await pause(until: cover.busyUntil)
+                guard !Task.isCancelled else { return }
                 stage.sprites["LNO_FD"] = nil
             }
         case "MAC.FLASH":
@@ -349,6 +352,8 @@ extension StoryEngine {
             front.alpha = Tween(from: 0, to: 256, start: now, duration: seconds(Double(ms < 0 ? 500 : ms)))
             stage.sprites["BGF"] = front
             await pause(until: front.busyUntil)
+            // A load or new game during the fade cancelled this run: the stage is the new story's now.
+            guard !Task.isCancelled else { return }
         }
         if kind == "ev" { Progress.shared.sawCG(file) }
         var background = stage.sprite(named: "BG")

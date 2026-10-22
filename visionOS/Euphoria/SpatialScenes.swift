@@ -58,7 +58,11 @@ final class SpatialSceneLibrary {
             touch(source)
             return image
         }
-        guard isSupported, !unavailable.contains(source) else { return nil }
+        guard isSupported, !unavailable.contains(source) else {
+            trace("request \(source.label): refused (supported \(isSupported), unavailable \(unavailable.contains(source)))")
+            return nil
+        }
+        trace("request \(source.label) (working: \(working?.label ?? "-"), waiting: \(visible.map(\.label)))")
         let id = nextWaiter
         nextWaiter += 1
         return await withTaskCancellationHandler {
@@ -84,6 +88,10 @@ final class SpatialSceneLibrary {
     func lookahead(_ sources: [SpatialSource]) {
         guard isSupported, Settings.shared.spatialScenes else { return }
         upcoming = sources.filter { ready[$0] == nil && !unavailable.contains($0) && $0 != working && !visible.contains($0) }
+        if upcoming.map(\.label) != lastTracedLookahead {
+            lastTracedLookahead = upcoming.map(\.label)
+            trace("lookahead \(lastTracedLookahead)")
+        }
         for source in sources where ready[source] != nil { touch(source) }
         start()
     }
@@ -120,6 +128,7 @@ final class SpatialSceneLibrary {
             let image = ready[source] == nil ? await generate(source) : ready[source]
             if image == nil { unavailable.insert(source) }
             working = nil
+            trace("done \(source.label): \(image == nil ? "no scene" : "ready"), \(waiters[source]?.count ?? 0) waiting")
             for continuation in (waiters.removeValue(forKey: source) ?? [:]).values {
                 continuation.resume(returning: image)
             }
@@ -204,6 +213,15 @@ final class SpatialSceneLibrary {
         let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull()])
         guard let data = context.pngRepresentation(of: output, format: .RGBA8, colorSpace: space) else { return nil }
         return CGImageSourceCreateWithData(data as CFData, nil)
+    }
+
+    @ObservationIgnored private var lastTracedLookahead: [String] = []
+
+    /// `-traceSpatial YES` (Debug builds): the queue's requests and results in Documents/debug.log.
+    private func trace(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "traceSpatial") { debugLog("Spatial queue: \(message())") }
+        #endif
     }
 
     private func touch(_ source: SpatialSource) {
@@ -299,6 +317,11 @@ struct SpatialPicture: View {
         // window hides them, even a view drawn "behind" this one. Containers read this
         // and clear their fills while the scene shows.
         .preference(key: SpatialShowingKey.self, value: showsSpatial ? [name] : [])
+        #if DEBUG
+        .onChange(of: showsSpatial, initial: true) { _, shows in
+            if UserDefaults.standard.bool(forKey: "traceSpatial") { debugLog("Spatial view: \(name) \(shows ? "spatial" : "flat")") }
+        }
+        #endif
         .task(id: TaskKey(name: name, tint: tint, enabled: settings.spatialScenes)) {
             loaded = nil
             guard settings.spatialScenes, let source else { return }

@@ -92,7 +92,7 @@ If `Resources/Game/` is missing, the user hasn't run the asset pipeline. Tell th
    ```sh
    xcrun devicectl device process launch --device "<headset>" <bundle id> -startLabel <label> -autoAdvance 1 -traceLines YES
    ```
-   The arguments are `-autostart YES`, `-startLabel <label>`, `-loadSlot <slot>`, `-autoAdvance <sec>`, `-choices 0,1`, `-skip YES`, `-traceLines YES`, `-traceSound YES`, `-panel history|save|load|settings|gallery|replays`, `-textHidden YES`, `-titleExtras YES`, `-viewGallerySet N`, `-replay <label>` and `-playMovie <name>`. They're implemented in `DebugAutomation` in `GameView.swift` and work in Debug builds only. Logs go to `Documents/debug.log` in the app container. Pull it with:
+   The arguments are `-autostart YES`, `-startLabel <label>`, `-loadSlot <slot>`, `-autoAdvance <sec>`, `-choices 0,1`, `-skip YES`, `-skipFor <sec>` (stop skipping after that long), `-traceLines YES`, `-traceSound YES`, `-traceSpatial YES` (spatial scene queue and display), `-simulateSpatial <sec>`, `-panel history|save|load|settings|gallery|replays`, `-textHidden YES`, `-titleExtras YES`, `-viewGallerySet N`, `-replay <label>` and `-playMovie <name>`. They're implemented in `DebugAutomation` in `GameView.swift` and work in Debug builds only. Logs go to `Documents/debug.log` in the app container. Pull it with:
    ```sh
    xcrun devicectl device copy from --device "<headset>" --domain-type appDataContainer \
      --domain-identifier <bundle id> --source Documents/debug.log --destination .build/

@@ -77,6 +77,10 @@ struct StageView: View {
             TimelineView(.animation(minimumInterval: nil, paused: !animating)) { _ in
                 let time = Date.timeIntervalSinceReferenceDate
                 let sprites = stage.ordered
+                // Backgrounds and event CGs become spatial scenes behind the window: the topmost
+                // full-screen still picture, as everything under it is covered.
+                let sceneIndex = spatial && settings.spatialScenes
+                    ? sprites.lastIndex { $0.isStillPicture(at: time) } : nil
                 // The lowest layer showing as a spatial scene: nothing under it may be opaque.
                 let spatialFloor = spatialShowing.isEmpty ? nil
                     : sprites.firstIndex { $0.image.map(spatialShowing.contains) ?? false }
@@ -84,10 +88,10 @@ struct StageView: View {
                     Color.black.clipShape(.rect(cornerRadius: Self.cornerRadius))
                         .opacity(spatialFloor == nil ? 1 : 0)
                     ForEach(Array(sprites.enumerated()), id: \.element.id) { index, sprite in
-                        let depth = depth(of: sprite, index: index, count: sprites.count)
+                        // The scene sits at the window's surface, wherever its layer would float.
+                        let depth = index == sceneIndex ? 0 : depth(of: sprite, index: index, count: sprites.count)
                         Group {
-                            if spatial, settings.spatialScenes, sprite.isStillBackground(at: time), let image = sprite.image {
-                                // Backgrounds and event CGs become spatial scenes behind the window.
+                            if index == sceneIndex, let image = sprite.image {
                                 // Event CGs change at once, as in the CG gallery.
                                 SpatialPicture(name: image, tint: sprite.tint,
                                                fades: !(image as NSString).lastPathComponent.lowercased().hasPrefix("ev_"))

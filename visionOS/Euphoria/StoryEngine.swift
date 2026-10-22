@@ -77,6 +77,9 @@ final class StoryEngine {
     var waitingForClick = false
     var skipping = false
     var autoPlay = false
+    /// A panel (history, save, load, settings) covers the story: auto and skip hold
+    /// at the line until it closes, as the original's menus pause them.
+    var menuOpen = false
 
     @ObservationIgnored var vars = Variables()
     @ObservationIgnored var selection = Selection()
@@ -152,8 +155,8 @@ final class StoryEngine {
             audio.restore(data.music)
         }
         // The saved scene's picture first, then what follows it.
-        if let sprite = stage.sprites["BG"], let background = sprite.image, SpatialSceneLibrary.isEligible(background),
-           let source = SpatialSource(background, tint: sprite.tint) {
+        if let sprite = stage.ordered.last(where: { $0.isStillPicture(at: Date.timeIntervalSinceReferenceDate) }), let picture = sprite.image,
+           let source = SpatialSource(picture, tint: sprite.tint) {
             SpatialSceneLibrary.shared.prefetch([source])
         }
         prefetchScenes()
@@ -401,7 +404,11 @@ final class StoryEngine {
         if catchUp != nil { return }
         if skipping {
             try? await Task.sleep(for: .milliseconds(30))
-            return
+            while skipping, menuOpen, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            // Skip turned off while held: this line waits for the reader like any other.
+            if skipping || Task.isCancelled { return }
         }
         waitingForClick = true
         await withCheckedContinuation { clickWaiter = $0 }

@@ -68,6 +68,7 @@ struct GameView: View {
         .animation(.easeInOut(duration: 0.25), value: panel)
         .animation(.easeInOut(duration: 0.4), value: engine.mode)
         .animation(.easeInOut(duration: 0.4), value: engine.movie)
+        .onChange(of: panel != nil, initial: true) { _, open in engine.menuOpen = open }
         .onChange(of: engine.finishedReplay) { _, finished in
             // A replay ended: back to its list, as in the original.
             guard let finished else { return }
@@ -235,10 +236,15 @@ private struct StoryView: View {
         .animation(.easeOut(duration: 0.2), value: engine.choices)
         .animation(.easeOut(duration: 0.4), value: engine.pictureChoices)
         .animation(.easeOut(duration: 0.2), value: textHidden)
-        .onChange(of: engine.lineSerial, initial: true) { _, _ in startReveal() }
+        .onChange(of: engine.lineSerial, initial: true) { _, _ in
+            startReveal()
+            // With instant text a line can arrive already complete, changing nothing else watched here.
+            scheduleAuto()
+        }
         .onChange(of: lineComplete) { _, _ in scheduleAuto() }
         .onChange(of: engine.waitingForClick) { _, _ in scheduleAuto() }
         .onChange(of: engine.autoPlay) { _, _ in scheduleAuto() }
+        .onChange(of: engine.menuOpen) { _, _ in scheduleAuto() }
         .accessibilityAction(named: "Continue", tap)
     }
 
@@ -274,7 +280,7 @@ private struct StoryView: View {
     }
 
     private func scheduleAuto() {
-        guard engine.autoPlay, lineComplete, engine.waitingForClick, let line = engine.line else { return }
+        guard engine.autoPlay, !engine.menuOpen, lineComplete, engine.waitingForClick, let line = engine.line else { return }
         let serial = engine.lineSerial
         let delay = settings.autoDelay + Double(line.text.count) * 0.02
         Task {
@@ -283,7 +289,7 @@ private struct StoryView: View {
             while engine.audio.isVoicePlaying, engine.autoPlay, engine.lineSerial == serial {
                 try? await Task.sleep(for: .milliseconds(200))
             }
-            if engine.autoPlay, engine.lineSerial == serial, engine.waitingForClick { engine.advance() }
+            if engine.autoPlay, !engine.menuOpen, engine.lineSerial == serial, engine.waitingForClick { engine.advance() }
         }
     }
 }
@@ -500,10 +506,18 @@ enum DebugAutomation {
         let interval = defaults.double(forKey: "autoAdvance")
         guard interval > 0 else { return }
         let skip = defaults.bool(forKey: "skip")
+        // `-skipFor 20`: skip for that many seconds, then read on at the automation's pace.
+        let skipFor = defaults.double(forKey: "skipFor")
+        let started = Date.now
         var picks = (defaults.string(forKey: "choices") ?? "").split(separator: ",").compactMap { Int($0) }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(interval))
-            if skip, engine.mode == .story, engine.choices == nil { engine.skipping = true }
+            let skipping = skip && (skipFor <= 0 || Date.now.timeIntervalSince(started) < skipFor)
+            if skip, !skipping, engine.skipping {
+                debugLog("Automation stopped skipping")
+                engine.skipping = false
+            }
+            if skipping, engine.mode == .story, engine.choices == nil { engine.skipping = true }
             if let buttons = engine.pictureChoices {
                 let pick = picks.isEmpty ? buttons[0].number : picks.removeFirst()
                 debugLog("Automation picked heroine \(pick)")
