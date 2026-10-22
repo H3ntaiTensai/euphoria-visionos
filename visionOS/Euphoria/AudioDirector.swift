@@ -25,6 +25,11 @@ final class AudioDirector {
     /// The background voices' volume (51–60, 81–90): 0 while a line is voiced, so a
     /// heroine's looping breaths and moans never play over her own spoken lines.
     private var backgroundVoices: Float = 1
+    /// Music and effects while a voice replays from the History panel: lower than the
+    /// voice highlight, so the old line stands out (the original's backlog only applies
+    /// the highlight).
+    private var replayLevel: Float = 1
+    static let historyReplayLevel: Float = 0.3
     private var duckWatcher: Task<Void, Never>?
 
     init() {
@@ -77,8 +82,10 @@ final class AudioDirector {
     private static func isBackgroundVoice(_ channel: Int) -> Bool { [5, 8].contains((channel - 1) / 10) }
 
     private func target(_ channel: Int) -> Float {
-        (levels[channel] ?? 1) * gain(Self.kind(of: channel))
-            * (Self.isDucked(channel) ? duck : 1) * (Self.isBackgroundVoice(channel) ? backgroundVoices : 1)
+        let kind = Self.kind(of: channel)
+        // Music takes the lower of the voice highlight and a History replay's level.
+        let lowered: Float = Self.isDucked(channel) ? min(duck, replayLevel) : kind == .voice ? 1 : replayLevel
+        return (levels[channel] ?? 1) * gain(kind) * lowered * (Self.isBackgroundVoice(channel) ? backgroundVoices : 1)
     }
 
     /// es.SND: an empty file stops the channel (fading over `fadeMs`; -1 is the
@@ -125,7 +132,11 @@ final class AudioDirector {
         player.numberOfLoops = loopsForever ? -1 : plays - 1
         levels[channel] = level
         players[channel] = player
-        if Self.isLineVoice(channel) { duckForVoice() }
+        if Self.isLineVoice(channel) {
+            // A story line's voice ends any History replay's lowering (replayVoice sets it again).
+            setReplayLevel(1, seconds: 0.3)
+            duckForVoice()
+        }
         let target = target(channel)
         if fadeIn > 0 {
             player.volume = 0
@@ -173,6 +184,7 @@ final class AudioDirector {
                 try? await Task.sleep(for: .milliseconds(100))
                 if !self.isLineVoicePlaying {
                     self.setDuck(1, seconds: 1)
+                    self.setReplayLevel(1, seconds: 1)
                     self.setBackgroundVoices(1, seconds: 0.5)
                     self.duckWatcher = nil
                     return
@@ -185,6 +197,14 @@ final class AudioDirector {
         guard duck != value else { return }
         duck = value
         for (channel, player) in players where Self.isDucked(channel) {
+            player.setVolume(target(channel), fadeDuration: seconds)
+        }
+    }
+
+    private func setReplayLevel(_ value: Float, seconds: Double) {
+        guard replayLevel != value else { return }
+        replayLevel = value
+        for (channel, player) in players where Self.kind(of: channel) != .voice {
             player.setVolume(target(channel), fadeDuration: seconds)
         }
     }
@@ -230,6 +250,7 @@ final class AudioDirector {
         duckWatcher?.cancel()
         duckWatcher = nil
         duck = 1
+        replayLevel = 1
         backgroundVoices = 1
     }
 
@@ -248,9 +269,12 @@ final class AudioDirector {
         }
     }
 
-    /// Plays one voice file (from the history panel).
+    /// Plays one voice file (from the history panel), with the other sounds lowered
+    /// until it ends and the background voices silent, as under any spoken line.
     func replayVoice(_ file: String) {
         play(channel: 29, file: file, fadeMs: 0, volume: -1, loop: 1)
+        guard players[29] != nil else { return }
+        setReplayLevel(Self.historyReplayLevel, seconds: 0.3)
     }
 }
 
