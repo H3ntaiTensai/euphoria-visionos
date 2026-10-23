@@ -87,9 +87,8 @@ struct BonusRoom: View {
                   contentAlignment: .top) {
             nowPlaying
         }
-        .onAppear { group = BonusPlace.group[section] ?? 1 }
-        .onChange(of: section) { group = BonusPlace.group[section] ?? 1 }
-        .onChange(of: group) { BonusPlace.group[section] = group }
+        .onAppear { group = BonusPlace.group }
+        .onChange(of: group) { BonusPlace.group = group }
         .onDisappear {
             // Only a track the music room started; otherwise the title theme plays on.
             if track != nil { engine.audio.stop(channel: 1, fadeMs: 500) }
@@ -106,6 +105,11 @@ struct BonusRoom: View {
             let defaults = UserDefaults.standard
             if let value = defaults.string(forKey: "bonusGroup"), let tab = Int(value) { group = tab }
             if section == .music, let value = defaults.string(forKey: "playTrack"), let index = Int(value) { play(index) }
+            // `-bonusSwitch replays`: change section a few seconds in, as the section tabs do.
+            if let name = defaults.string(forKey: "bonusSwitch"), let target = Panel(rawValue: name), target != section {
+                try? await Task.sleep(for: .seconds(4))
+                open(target)
+            }
         }
         #endif
     }
@@ -405,10 +409,11 @@ struct BonusRoom: View {
     }
 }
 
-/// The character tab and section shown last, kept while the app runs so a finished
-/// replay returns to the same character.
-@MainActor private enum BonusPlace {
-    static var group: [Panel: Int] = [:]
+/// The character tab shown last, shared by the CG gallery and scene replay in both
+/// bonus layouts and kept while the app runs, so switching sections or finishing a
+/// replay stays on the same character.
+@MainActor enum BonusPlace {
+    static var group = 1
 }
 
 /// The original's six character tiles on a thick glass slab, scrolling sideways

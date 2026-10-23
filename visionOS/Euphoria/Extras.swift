@@ -166,15 +166,21 @@ private struct CharacterAlbum<Item: View>: View {
                 .accessibilityLabel("\(counts.seen) of \(counts.total) unlocked")
         }
         .onAppear {
-            if let place = AlbumPlace.remembered[room] { (group, page) = place }
+            // The character is shared with the other album (BonusPlace); the page is this
+            // album's own, kept only while it is on the same character.
+            group = BonusPlace.group
+            if let place = AlbumPlace.remembered[room], place.group == group { page = place.page }
         }
-        .onChange(of: group) { AlbumPlace.remembered[room] = (group, page) }
+        .onChange(of: group) {
+            BonusPlace.group = group
+            AlbumPlace.remembered[room] = (group, page)
+        }
         .onChange(of: page) { AlbumPlace.remembered[room] = (group, page) }
     }
 }
 
-/// The tab and page last shown in each album, kept while the app runs so a finished
-/// replay returns to the same place.
+/// The page last shown in each album and the character it was on, kept while the app
+/// runs so a finished replay returns to the same place.
 @MainActor private enum AlbumPlace {
     static var remembered: [Panel: (group: Int, page: Int)] = [:]
 }
@@ -311,10 +317,8 @@ struct PictureViewer: View {
 
     private func navigationButton(_ title: String, symbol: String, enabled: Bool, trailingIcon: Bool = false,
                                   action: @escaping () -> Void) -> some View {
-        Button {
-            SystemSound.play(SystemSound.click)
-            action()
-        } label: {
+        // Silent, like a tap on the picture: paging through a set shouldn't click.
+        Button(action: action) {
             HStack(spacing: 8 * scale) {
                 if !trailingIcon { Image(systemName: symbol) }
                 Text(title)
