@@ -54,6 +54,7 @@ CG gallery, scene replay, music replay and staff comments, redesigned for vision
 
 - **Effects at the original's timing.** Sprite tweens and easing, quakes, flashes, fades, and rule-mask transitions (a Metal shader).
 - **Movies.** The opening and five ending movies, converted to H.264.
+- **An optional app icon from your own art.** `swift tools/make_icon.swift <square picture> visionOS/Euphoria/Assets.xcassets` turns a picture into a visionOS icon, and `tools/create_xcode_project.py` adds it to the project when it's there. The art and `Assets.xcassets` stay out of git, so the repository ships no icon. visionOS has no flat icon and wants two layers holding content, so the art sits on the Back with a transparent sheet in front of it and draws undivided.
 
 ## Requirements
 
@@ -64,7 +65,25 @@ CG gallery, scene replay, music replay and staff comments, redesigned for vision
 - An **Apple Vision Pro** with Developer Mode on (*Settings › Privacy & Security › Developer Mode*), paired with your Mac in Xcode.
 - An Apple developer account. A free one works for personal installs.
 
+## Build with an AI agent
+
+The quickest way: let a coding agent that can run commands on your Mac (Claude Code, Codex, Cursor, …) do the whole build. Give it this repository and your game folder, for example:
+
+```text
+Clone https://github.com/H3ntaiTensai/euphoria-visionos, read its AGENT.md,
+and build and install Euphoria on my Apple Vision Pro.
+My copy of the game is installed at: <path to your Euphoria folder>
+```
+
+The agent follows [AGENT.md](AGENT.md): it copies the game into place, extracts and converts it, checks the routes, builds the app and installs it. It asks you for what only you know: your Apple developer team ID, a bundle ID of your own, and your headset's name. A few steps stay yours:
+
+- Meet the [requirements](#requirements) first: Xcode signed in with your Apple ID, and the headset in Developer Mode and paired with your Mac.
+- Keep the headset on and unlocked while it installs.
+- Trust the developer certificate on the headset if it asks (see the end of step 4 below).
+
 ## Build
+
+To build by hand instead, follow these steps.
 
 ### 1. Put the game in place
 
@@ -173,9 +192,9 @@ This is a headless copy of the interpreter. It takes every choice and reports un
 
 ### Debug launch arguments (Debug builds)
 
-`-autostart YES` · `-startLabel 00_op_02` · `-loadSlot slot33` · `-autoAdvance 0.5` · `-choices 0,1` · `-skip YES` · `-traceLines YES` · `-traceSound YES` · `-panel history|save|load|settings|gallery|replays|music|staff` · `-textHidden YES` · `-titleExtras YES` · `-viewGallerySet 0` · `-bonusGroup 3` · `-playTrack 0` · `-replay RP_nem_h01` · `-playMovie op`
+`-autostart YES` · `-startLabel 00_op_02` · `-loadSlot slot33` · `-autoAdvance 0.5` · `-choices 0,1` · `-skip YES` · `-skipFor 30` · `-traceLines YES` · `-traceSound YES` · `-traceSpatial YES` · `-simulateSpatial 2.5` · `-panel history|save|load|settings|gallery|replays|music|staff` · `-textHidden YES` · `-titleExtras YES` · `-viewGallerySet 0` · `-bonusGroup 3` · `-bonusSwitch replays` · `-playTrack 0` · `-replay RP_nem_h01` · `-playMovie op`
 
-Add them in Xcode under *Product › Scheme › Edit Scheme › Run › Arguments*, or after the bundle ID in `xcrun devicectl device process launch`. Logs go to `Documents/debug.log` in the app container. Download it with `xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle id> --source Documents/debug.log --destination .`
+Add them in Xcode under *Product › Scheme › Edit Scheme › Run › Arguments*, or after `--` in `xcrun devicectl device process launch --device "Apple Vision Pro" <bundle id> -- -autostart YES`. Without the `--`, devicectl reads arguments such as `-traceLines` as its own options. Logs go to `Documents/debug.log` in the app container. Download it with `xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle id> --source Documents/debug.log --destination .`
 
 ## Known gaps
 
@@ -186,7 +205,7 @@ Add them in Xcode under *Product › Scheme › Edit Scheme › Run › Argument
 
 ## Working with an AI agent
 
-See [AGENT.md](AGENT.md) for the build, the architecture rules and the do-nots, written for coding agents (Claude Code, Codex, Cursor, …).
+See [AGENT.md](AGENT.md) for the build, the architecture rules and the do-nots, written for coding agents (Claude Code, Codex, Cursor, …). To have an agent build the app for you, see [Build with an AI agent](#build-with-an-ai-agent).
 
 ## Legal
 

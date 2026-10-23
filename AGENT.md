@@ -53,6 +53,19 @@ Git ignores these local folders, but they exist on the user's machine after a bu
 - `decompiled/source/`: YU-RIS-style source, including the ERIS framework at `decompiled/source/eris/`. This is the reference for how framework calls behave.
 - `visionOS/Euphoria/Resources/Game/`: converted story and assets bundled into the app.
 
+## First-time build for a new user
+
+When someone asks you to build and install the app from scratch (README.md › Build with an AI agent), run README.md › Build for them, step by step:
+
+1. **Ask first** for what only they know: the path to their installed game (the folder holding `euphoria.exe` and `pac/`), their Apple developer team ID, a bundle ID of their own (suggest `com.<name>.euphoria`), and their headset's name from `xcrun devicectl list devices`. Check the requirements in README.md: Xcode 26+, Python 3.9+, about 12 GB free.
+2. **Copy the game** to `original/Euphoria/` and confirm `original/Euphoria/pac/bn.ypf` exists. Never commit it.
+3. **Extract and convert** with the commands in README.md › Build › 2, in order. Extraction and audio conversion take several minutes each; run them in the background and report progress.
+4. **Check the conversion** with `explore_routes.py` (see Verify your change, step 2). It should reach 456/457 scripts and all six movies.
+5. **Generate the project** with their team ID and bundle ID (below), then build, install and launch.
+6. **Hand back what you can't do:** signing in to Xcode, enabling Developer Mode, pairing the headset, and trusting the developer certificate on the headset (*Settings › General › VPN & Device Management*). If they have PC saves, offer README.md › Importing PC saves.
+
+Never commit their game data, team ID, bundle ID or headset name.
+
 ## Build and run
 
 From the repo root (the full first-time pipeline is in README.md › Build):
@@ -66,8 +79,10 @@ xcodebuild -project visionOS/Euphoria.xcodeproj -scheme Euphoria \
   -allowProvisioningUpdates build
 xcrun devicectl list devices
 xcrun devicectl device install app --device "<headset>" .build/DeviceData/Build/Products/Debug-xros/Euphoria.app
-xcrun devicectl device process launch --device "<headset>" <bundle id> -autostart YES
+xcrun devicectl device process launch --device "<headset>" <bundle id> -- -autostart YES
 ```
+
+Put launch arguments after `--`: without it, devicectl reads arguments such as `-traceLines` as its own options.
 
 The headset must be awake, unlocked, in Developer Mode and paired with the Mac. If `devicectl` can't reach it, tell the user. Don't retry in a loop.
 
@@ -77,7 +92,7 @@ If you change `tools/build_story.py` or `tools/yuris.py`, regenerate the story J
 python3 tools/build_story.py extracted/bn/ysbin extracted visionOS/Euphoria/Resources/Game
 ```
 
-If `Resources/Game/` is missing, the user hasn't run the asset pipeline. Tell them, and don't fabricate placeholder assets.
+If `Resources/Game/` is missing, the asset pipeline hasn't run. Run it from the user's own game (see First-time build) if they want a build; otherwise tell them. Never fabricate placeholder assets.
 
 ## Verify your change
 
@@ -90,7 +105,7 @@ If `Resources/Game/` is missing, the user hasn't run the asset pipeline. Tell th
    The baseline is 456/457 scripts reached, all six movies, no problems, and 78/78 replays clean. `explore_routes.py` mirrors the Swift interpreter. If you change flow semantics in `StoryEngine.swift`, make the same change there.
 3. **It looks right.** Launch on the headset with the debug launch arguments to jump straight to the scene you changed, then ask the user to check it in the headset:
    ```sh
-   xcrun devicectl device process launch --device "<headset>" <bundle id> -startLabel <label> -autoAdvance 1 -traceLines YES
+   xcrun devicectl device process launch --device "<headset>" <bundle id> -- -startLabel <label> -autoAdvance 1 -traceLines YES
    ```
    The arguments are `-autostart YES`, `-startLabel <label>`, `-loadSlot <slot>`, `-autoAdvance <sec>`, `-choices 0,1`, `-skip YES`, `-skipFor <sec>` (stop skipping after that long), `-traceLines YES`, `-traceSound YES`, `-traceSpatial YES` (spatial scene queue and display), `-simulateSpatial <sec>`, `-panel history|save|load|settings|gallery|replays`, `-textHidden YES`, `-titleExtras YES`, `-viewGallerySet N`, `-replay <label>`, `-playMovie <name>`, `-bonusGroup N` and `-bonusSwitch <section>` (change bonus section after a few seconds). They're implemented in `DebugAutomation` in `GameView.swift` and work in Debug builds only. Logs go to `Documents/debug.log` in the app container. Pull it with:
    ```sh
