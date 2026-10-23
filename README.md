@@ -22,13 +22,13 @@ Full-screen backgrounds and event CGs become visionOS spatial scenes behind the 
 
 ### Choices
 
-The original's branches, variables and jumps are interpreted directly, so every route and all six endings play. Text choices appear as glass buttons. The heroine selection screen uses the original's art.
+The original's branches, variables and jumps are interpreted directly, so every route and ending plays. Text choices appear as glass buttons. The heroine selection screen uses the original's art.
 
 ![A story choice](docs/screenshots/choices.jpg)
 
 ### History with voice replay
 
-A scrolling backlog of every line, with the choices you took marked. Tap the speaker icon on a voiced line to hear it again.
+A scrolling backlog of the last 300 lines, with the choices you took marked. Saves keep the last 100. Tap the speaker icon on a voiced line to hear it again.
 
 ![The history panel](docs/screenshots/history.jpg)
 
@@ -46,7 +46,7 @@ Text speed, auto delay, text size, the original's skip options (only skip alread
 
 ### Bonus menu
 
-CG gallery, scene replay, music replay and staff comments, redesigned for visionOS. The sections sit in a tab ornament beside the window, and the original's character tiles scroll on a glass slab across its top. Gallery and scene replay group entries by character, as the original does, with the character's portrait beside them. The gallery has a Spatial on/off switch and a Previous / Next bar for each set, and music replay has a now-playing bar. The menus use a light glass with the original's white room faded into it. The bonus menu opens after your first ending, as in the original. Pictures, scenes and comments unlock as you play or by importing the PC's `gsd.sd`; every music track is open. Settings › Classic Bonus Menu switches to the original PC layout.
+CG gallery, scene replay, music replay and staff comments, redesigned for visionOS. The sections sit in a tab ornament beside the window, and the original's character tiles scroll on a glass slab across its top. Gallery and scene replay group entries by character, as the original does, with the character's portrait beside them. The gallery has a Spatial on/off switch and a Previous / Next bar for each set, and music replay has a now-playing bar. The menus use a light glass with the original's white room faded into it; the section tabs use plain white glass. The bonus menu opens after your first ending, as in the original. Pictures, scenes and comments unlock as you play or by importing the PC's `gsd.sd`; every music track is open. Settings › Classic Bonus Menu switches to the original PC layout.
 
 ![The bonus menu's scene replay, with thumbnails blurred](docs/screenshots/bonus-menu.jpg)
 
@@ -209,4 +209,4 @@ See [AGENT.md](AGENT.md) for the build, the architecture rules and the do-nots, 
 
 ## Legal
 
-This is an unofficial fan project and is not affiliated with CLOCKUP or MangaGamer. It contains no game assets, scripts or text. Use it only with a copy of the game you own, and don't distribute builds that contain game data.
+This is an unofficial fan project and is not affiliated with CLOCKUP or MangaGamer. It contains no game files: no assets, scripts or story text. The screenshots in `docs/` show the game's art for illustration only. Use it only with a copy of the game you own, and don't distribute builds that contain game data.
