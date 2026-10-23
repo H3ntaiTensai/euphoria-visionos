@@ -53,7 +53,7 @@ CG gallery, scene replay, music replay and staff comments, redesigned for vision
 ### Also included
 
 - **Effects at the original's timing.** Sprite tweens and easing, quakes, flashes, fades, and rule-mask transitions (a Metal shader).
-- **Movies.** The opening and five ending movies, converted to H.264.
+- **Movies.** Plays the opening and five ending movies. They aren't in this repository: you convert them from your own copy of the game to H.264 with `tools/convert_movies.sh` (step 2 of the build).
 - **An optional app icon from your own art.** `swift tools/make_icon.swift <square picture> visionOS/Euphoria/Assets.xcassets` turns a picture into a visionOS icon, and `tools/create_xcode_project.py` adds it to the project when it's there. The art and `Assets.xcassets` stay out of git, so the repository ships no icon. visionOS has no flat icon and wants two layers holding content, so the art sits on the Back with a transparent sheet in front of it and draws undivided.
 
 ## Requirements
