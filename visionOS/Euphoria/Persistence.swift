@@ -196,6 +196,15 @@ final class ReadLog {
         return true
     }
 
+    /// Writes now, before the app ends (Quit), instead of waiting for the scheduled write.
+    func flush() {
+        let snapshot = lines
+        let url = url
+        queue.sync {
+            if let data = try? JSONEncoder().encode(snapshot) { try? data.write(to: url, options: .atomic) }
+        }
+    }
+
     private func scheduleWrite() {
         guard !writeScheduled else { return }
         writeScheduled = true
@@ -264,6 +273,9 @@ final class SaveStore {
             return nil
         }
     }
+
+    /// Waits for queued writes to reach the disk, before the app ends (Quit).
+    func flush() { queue.sync {} }
 
     func exists(_ slot: String) -> Bool { FileManager.default.fileExists(atPath: url(slot).path) }
 }

@@ -107,6 +107,7 @@ struct TitleView: View {
     let engine: StoryEngine
     @Binding var panel: Panel?
     @State private var extras = UserDefaults.standard.bool(forKey: "titleExtras")
+    @State private var confirmingQuit = false
     private let progress = Progress.shared
 
     /// The original's menu column: x 671, rows 55 apart from y 396 (ES.TITLE.BTDEF).
@@ -131,6 +132,11 @@ struct TitleView: View {
             .animation(.easeInOut(duration: 0.25), value: extras)
         }
         .clipShape(.rect(cornerRadius: StageView.cornerRadius))
+        // As the original's end confirmation (ES.ENDCONF).
+        .alert("Quit Euphoria?", isPresented: $confirmingQuit) {
+            Button("Quit", role: .destructive) { Self.quit(engine) }
+            Button("Cancel", role: .cancel) {}
+        }
         .task {
             // As ES.TITLE.LOOP: the opening theme, then the title call (system voice
             // 0002) a moment later, in the original's default voice, Nemu's.
@@ -169,18 +175,24 @@ struct TitleView: View {
                 ("load", { panel = .load }),
                 ("omake", progress.extrasUnlocked ? { extras = true } : nil),
                 ("config", { panel = .settings }),
-                ("end", { Self.quit(engine) })]
+                ("end", { confirmingQuit = true })]
     }
 
-    /// Quit: close the game window. visionOS keeps an app's last window open on
-    /// dismissWindow, so ask the system to end the window's scene session instead.
+    /// Quit: end the app, as the original's End does. Pending saves, the read log and
+    /// settings are written first; then the window's scene session is closed (visionOS
+    /// keeps an app's last window open on dismissWindow) and the process exits.
     static func quit(_ engine: StoryEngine) {
         engine.audio.stopAll()
+        SaveStore.shared.flush()
+        ReadLog.shared.flush()
+        UserDefaults.standard.synchronize()
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             UIApplication.shared.requestSceneSessionDestruction(scene.session, options: nil) { error in
                 debugLog("Quit failed: \(error.localizedDescription)")
             }
         }
+        // A moment for the window to close, then end the process.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { exit(0) }
     }
 
     static func label(_ art: String) -> String {
