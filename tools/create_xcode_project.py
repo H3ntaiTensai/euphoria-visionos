@@ -25,13 +25,17 @@ for file in sorted(list((ROOT / "Euphoria").glob("*.swift")) + list((ROOT / "Eup
     ref = add(file.name, f'isa = PBXFileReference; lastKnownFileType = {kind}; path = "{file.name}"; sourceTree = "<group>";')
     refs.append(ref)
     sources.append(add("build" + file.name, f"isa = PBXBuildFile; fileRef = {ref};"))
+# The app icon's asset catalog is made locally (tools/make_icon.swift) and kept out of git.
+has_icon = (ROOT / "Euphoria" / "Assets.xcassets").exists()
+assets = add("assets", 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Assets.xcassets"; sourceTree = "<group>";') if has_icon else None
 game = add("game", 'isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Game; sourceTree = "<group>";')
 fonts = add("fonts", 'isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Fonts; sourceTree = "<group>";')
 resources = ",".join([add("gameBuild", f"isa = PBXBuildFile; fileRef = {game};"),
-                      add("fontsBuild", f"isa = PBXBuildFile; fileRef = {fonts};")])
+                      add("fontsBuild", f"isa = PBXBuildFile; fileRef = {fonts};")]
+                     + ([add("assetsBuild", f"isa = PBXBuildFile; fileRef = {assets};")] if has_icon else []))
 info = add("info", 'isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";')
 product = add("product", 'isa = PBXFileReference; explicitFileType = wrapper.application; path = Euphoria.app; sourceTree = BUILT_PRODUCTS_DIR;')
-group = add("appGroup", f'isa = PBXGroup; children = ({",".join(refs + [game, fonts, info])},); path = Euphoria; sourceTree = "<group>";')
+group = add("appGroup", f'isa = PBXGroup; children = ({",".join(refs + [game, fonts, info] + ([assets] if has_icon else []))},); path = Euphoria; sourceTree = "<group>";')
 products = add("products", f'isa = PBXGroup; children = ({product},); name = Products; sourceTree = "<group>";')
 main = add("main", f'isa = PBXGroup; children = ({group}, {products},); sourceTree = "<group>";')
 source_phase = add("sources", f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({",".join(sources)},); runOnlyForDeploymentPostprocessing = 0;')
@@ -45,7 +49,10 @@ for level in ["project", "target"]:
             settings += ''' PRODUCT_NAME = Euphoria; PRODUCT_BUNDLE_IDENTIFIER = com.euphoria.vision;
             INFOPLIST_FILE = Euphoria/Info.plist; TARGETED_DEVICE_FAMILY = 7;
             SUPPORTED_PLATFORMS = "xros xrsimulator"; CODE_SIGN_STYLE = Automatic;
-            GENERATE_INFOPLIST_FILE = NO; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";'''
+            GENERATE_INFOPLIST_FILE = NO;
+            LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";'''
+            if has_icon:
+                settings += " ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;"
             if os.environ.get("DEVELOPMENT_TEAM"):
                 settings += f' DEVELOPMENT_TEAM = {os.environ["DEVELOPMENT_TEAM"]};'
             if os.environ.get("BUNDLE_ID"):

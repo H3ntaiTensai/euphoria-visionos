@@ -21,3 +21,7 @@ __pycache__/
 
 # Converted PC saves
 /imported-saves/
+
+# App icon art — local only (made from your own art by tools/make_icon.swift)
+/port_art/
+/visionOS/Euphoria/Assets.xcassets/
