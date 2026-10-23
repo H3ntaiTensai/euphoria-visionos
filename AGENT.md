@@ -134,4 +134,4 @@ If `Resources/Game/` is missing, the asset pipeline hasn't run. Run it from the 
 
 - Work on a branch. Keep commits small and use imperative subjects ("Add blend mode support to es.SP").
 - Run `git status` before committing, and confirm that no file under the ignored game-data paths is staged.
-- This repo is private. Don't change its visibility, and don't push to any other remote.
+- Commit and push only when the user asks, and only to their own clone or fork.
