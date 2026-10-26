@@ -232,7 +232,7 @@ private struct StoryView: View {
                         }
                         if let line = engine.line {
                             DialoguePanel(line: line, revealed: revealed, complete: lineComplete,
-                                          waiting: engine.waitingForClick, width: proxy.size.width * 0.86,
+                                          waiting: engine.waitingForClick, width: panelWidth(proxy.size.width),
                                           sizeScale: engine.textSize.map { Double($0) / 22 } ?? 1)
                         }
                     }
@@ -258,6 +258,19 @@ private struct StoryView: View {
         .onChange(of: engine.autoPlay) { _, _ in scheduleAuto() }
         .onChange(of: engine.menuOpen) { _, _ in scheduleAuto() }
         .accessibilityAction(named: "Continue", tap)
+    }
+
+    /// The box's width: 86% of the window at the reader's own 100% text size, and that
+    /// same fraction of it scaled by whatever size they chose — the box shrinks with its
+    /// type, so small text sits in a small box over more of the picture, and a line breaks
+    /// where it would have broken anyway. The window still owns the width: the fraction is
+    /// fixed and the box takes the height its words need at any window size.
+    ///
+    /// Clamped to the window because the scaling runs both ways — past ~110% the unclamped
+    /// box would be wider than the window it floats in, so big text grows tall instead of
+    /// running off the edge.
+    private func panelWidth(_ windowWidth: CGFloat) -> CGFloat {
+        min(windowWidth * 0.94, windowWidth * 0.86 * CGFloat(settings.textScale))
     }
 
     private func tap() {
@@ -317,33 +330,54 @@ private struct DialoguePanel: View {
     var settings = Settings.shared
     @Environment(\.uiScale) private var scale
 
+    /// The type's scale: the window's, the reader's text size and the script's own size.
+    private var typeScale: CGFloat { CGFloat(settings.textScale) * CGFloat(sizeScale) * scale }
+    /// The box's own scale: the window's times the reader's text size, so a smaller text
+    /// gets a smaller box rather than the same box with a margin round its letters.
+    ///
+    /// The window's share is what it always was — here that is the width share, `scale`
+    /// being the window's width over the 1440 design width — so the box stays the fixed
+    /// fraction of the window it has always been, and at 100% text these are exactly the
+    /// numbers the box has always had. The script's `es.TextSizeChange` is left out on
+    /// purpose: a line the script draws small shrinks its letters, not the box the reader
+    /// is reading in, and a box that resized on every change of script size would jump
+    /// about mid-scene.
+    private var boxScale: CGFloat { CGFloat(settings.textScale) * scale }
+    /// The text column's inset from each side of the box.
+    private var gutter: CGFloat { 44 * boxScale }
+
     var body: some View {
-        let text = settings.textScale * sizeScale * scale
-        VStack(alignment: .leading, spacing: 10 * scale) {
+        let text = typeScale
+        let chrome = boxScale
+        VStack(alignment: .leading, spacing: 10 * chrome) {
             if let name = line.name {
                 Text(name)
                     .font(.game(30 * text, weight: .semibold))
                     .foregroundStyle(CharacterColors.color(for: line))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             // The unrevealed rest keeps its space, so the panel never resizes mid-line.
             Text("\(Text(line.text.prefix(revealed)))\(Text(line.text.dropFirst(revealed)).foregroundStyle(.clear))")
                 .font(.game(30 * text))
                 .lineSpacing(7 * text)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                // Words the window can't be offered less room than: the box grows to fit
+                // them, because a squeezed Text ends the sentence with an ellipsis instead.
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityLabel(line.text)
         }
-        .padding(.horizontal, 44 * scale)
-        .padding(.vertical, 30 * scale)
+        .padding(.horizontal, gutter)
+        .padding(.vertical, 30 * chrome)
         .frame(width: width, alignment: .leading)
-        .frame(minHeight: 170 * scale, alignment: .topLeading)
+        .frame(minHeight: 170 * chrome, alignment: .topLeading)
         // Tinted so light text stays readable over the game's many white rooms.
-        .background(.black.opacity(0.42), in: .rect(cornerRadius: 34 * scale))
-        .glassBackgroundEffect(in: .rect(cornerRadius: 34 * scale))
+        .background(.black.opacity(0.42), in: .rect(cornerRadius: 34 * chrome))
+        .glassBackgroundEffect(in: .rect(cornerRadius: 34 * chrome))
         .overlay(alignment: .bottomTrailing) {
             Image(systemName: "chevron.down")
-                .font(.system(size: 20 * scale, weight: .semibold))
+                .font(.system(size: 20 * chrome, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .padding(22 * scale)
+                .padding(22 * chrome)
                 .opacity(complete && waiting ? 1 : 0)
                 .symbolEffect(.bounce.down, options: .repeating, isActive: complete && waiting)
         }
